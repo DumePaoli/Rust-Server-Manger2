@@ -11,8 +11,11 @@ from pathlib import Path
 
 from config import load_config, save_config
 from server_manager import ServerManager
+from version import VERSION, GITHUB_REPO
+from updater import UpdateChecker, apply_update, get_download_progress
 
 manager = ServerManager()
+update_checker = UpdateChecker(VERSION, GITHUB_REPO)
 
 
 @asynccontextmanager
@@ -127,6 +130,31 @@ async def console_ws(ws: WebSocket):
     finally:
         if ws in active_ws:
             active_ws.remove(ws)
+
+
+# ── Update routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/update/check")
+async def check_update(force: bool = False):
+    return update_checker.check(force=force)
+
+
+@app.get("/api/update/progress")
+async def update_progress():
+    return get_download_progress()
+
+
+@app.post("/api/update/apply")
+async def apply_update_route():
+    info = update_checker.check()
+    if not info.get("available"):
+        return {"success": False, "message": "Aucune mise à jour disponible."}
+    url = info.get("download_url")
+    if not url:
+        return {"success": False, "message": "URL de téléchargement introuvable dans la release GitHub."}
+    import asyncio
+    asyncio.get_event_loop().run_in_executor(None, apply_update, url)
+    return {"success": True, "message": "Téléchargement en cours…"}
 
 
 # ── Serve React build ──────────────────────────────────────────────────────

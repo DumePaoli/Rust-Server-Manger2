@@ -1,15 +1,8 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard,
-  Settings,
-  Terminal,
-  Package,
-  Users,
-  Trash2,
-  MessageSquare,
-  Clock,
-  Download,
-  SlidersHorizontal,
+  LayoutDashboard, Settings, Terminal, Package, Users,
+  Trash2, MessageSquare, Clock, Download, SlidersHorizontal,
+  ArrowUpCircle,
 } from "lucide-react";
 
 const NAV = [
@@ -28,7 +21,9 @@ const NAV = [
   { to: "/installer", icon: Download, label: "Installer" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ updateInfo, onUpdateClick }) {
+  const hasUpdate = updateInfo?.available;
+
   return (
     <aside className="w-60 shrink-0 bg-surface-800 border-r border-surface-600 flex flex-col h-screen sticky top-0">
       {/* Logo */}
@@ -36,11 +31,33 @@ export default function Sidebar() {
         <div className="w-8 h-8 bg-rust-600 rounded-lg flex items-center justify-center font-bold text-white text-sm">
           R
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <div className="font-semibold text-white text-sm leading-tight">Rust Manager</div>
-          <div className="text-xs text-gray-500">v1.0.0</div>
+          <div className="text-xs text-gray-500">v{updateInfo?.current_version ?? "1.0.0"}</div>
         </div>
+        {/* Update badge */}
+        {hasUpdate && (
+          <button
+            onClick={onUpdateClick}
+            title={`Mise à jour v${updateInfo.latest_version} disponible`}
+            className="relative flex items-center justify-center w-7 h-7 rounded-lg bg-rust-600/20 hover:bg-rust-600/40 text-rust-400 transition-colors"
+          >
+            <ArrowUpCircle size={16} />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rust-500 rounded-full border-2 border-surface-800 animate-pulse" />
+          </button>
+        )}
       </div>
+
+      {/* Update banner */}
+      {hasUpdate && (
+        <button
+          onClick={onUpdateClick}
+          className="mx-3 mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-rust-600/15 border border-rust-700/50 text-rust-300 text-xs font-medium hover:bg-rust-600/25 transition-colors"
+        >
+          <ArrowUpCircle size={13} />
+          <span>v{updateInfo.latest_version} disponible !</span>
+        </button>
+      )}
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">

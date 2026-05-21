@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
+import UpdateModal from "./components/UpdateModal";
 import Dashboard from "./pages/Dashboard";
 import ConsolePage from "./pages/ConsolePage";
 import ServerSettings from "./pages/ServerSettings";
@@ -8,6 +10,7 @@ import PlayersPage from "./pages/PlayersPage";
 import WipePage from "./pages/WipePage";
 import InstallerPage from "./pages/InstallerPage";
 import AppSettings from "./pages/AppSettings";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 function ComingSoon({ title }) {
   return (
@@ -22,9 +25,15 @@ function ComingSoon({ title }) {
 }
 
 export default function App() {
+  const { info: updateInfo, recheck } = useUpdateCheck();
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+
   return (
     <div className="flex w-full min-h-screen bg-surface-900">
-      <Sidebar />
+      <Sidebar
+        updateInfo={updateInfo}
+        onUpdateClick={() => setShowUpdateModal(true)}
+      />
       <main className="flex-1 flex flex-col min-w-0 overflow-auto">
         <Routes>
           <Route path="/" element={<Dashboard />} />
@@ -40,6 +49,14 @@ export default function App() {
           <Route path="/discord" element={<ComingSoon title="Discord Integration" />} />
         </Routes>
       </main>
+
+      {showUpdateModal && updateInfo?.available && (
+        <UpdateModal
+          info={updateInfo}
+          onClose={() => setShowUpdateModal(false)}
+          onRecheck={recheck}
+        />
+      )}
     </div>
   );
 }
