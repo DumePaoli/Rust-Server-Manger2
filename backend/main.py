@@ -130,7 +130,14 @@ async def console_ws(ws: WebSocket):
 
 
 # ── Serve React build ──────────────────────────────────────────────────────
-frontend_build = Path(__file__).parent.parent / "frontend" / "dist"
+def _frontend_dist() -> Path:
+    import sys
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle: files are in sys._MEIPASS
+        return Path(sys._MEIPASS) / "frontend" / "dist"
+    return Path(__file__).parent.parent / "frontend" / "dist"
+
+frontend_build = _frontend_dist()
 
 if frontend_build.exists():
     app.mount("/assets", StaticFiles(directory=frontend_build / "assets"), name="assets")

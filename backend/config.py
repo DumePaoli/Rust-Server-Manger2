@@ -2,7 +2,17 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent / "server_config.json"
+
+def _config_path() -> Path:
+    env_dir = os.environ.get("RSM_CONFIG_DIR")
+    if env_dir:
+        d = Path(env_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "server_config.json"
+    return Path(__file__).parent / "server_config.json"
+
+
+CONFIG_PATH = _config_path()
 
 DEFAULT_CONFIG = {
     "server_name": "My Rust Server",
