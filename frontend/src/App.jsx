@@ -11,6 +11,7 @@ import WipePage from "./pages/WipePage";
 import InstallerPage from "./pages/InstallerPage";
 import AppSettings from "./pages/AppSettings";
 import MessagesPage from "./pages/MessagesPage";
+import DiscordPage from "./pages/DiscordPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 function ComingSoon({ title }) {
@@ -47,7 +48,7 @@ export default function App() {
           <Route path="/app-settings" element={<AppSettings />} />
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/times" element={<ComingSoon title="Times" />} />
-          <Route path="/discord" element={<ComingSoon title="Discord Integration" />} />
+          <Route path="/discord" element={<DiscordPage />} />
         </Routes>
       </main>
 

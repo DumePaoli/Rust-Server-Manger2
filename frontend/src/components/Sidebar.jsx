@@ -15,7 +15,7 @@ const NAV = [
   { divider: true },
   { to: "/messages", icon: MessageSquare, label: "Messages" },
   { to: "/times", icon: Clock, label: "Times", soon: true },
-  { to: "/discord", icon: MessageSquare, label: "Discord", soon: true },
+  { to: "/discord", icon: MessageSquare, label: "Discord" },
   { divider: true },
   { to: "/app-settings", icon: SlidersHorizontal, label: "App Settings" },
   { to: "/installer", icon: Download, label: "Installer" },

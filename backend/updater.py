@@ -180,20 +180,19 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     _progress.done = True
     time.sleep(0.5)
 
-    # Use taskkill to kill this process from an external process — the most
-    # reliable way to exit on Windows from a background thread inside PyInstaller.
-    pid = os.getpid()
+    # Write the shutdown signal file — the launcher's watcher thread will
+    # detect it and call webview.destroy(), causing a clean process exit.
+    # This is far more reliable than os._exit() from a background thread.
+    config_dir = os.environ.get("RSM_CONFIG_DIR", str(current_exe.parent))
+    signal_path = Path(config_dir) / ".shutdown_signal"
     try:
-        subprocess.Popen(
-            ["taskkill", "/F", "/PID", str(pid)],
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        signal_path.touch()
     except Exception:
         pass
 
-    # Fallback in case taskkill is slow
-    time.sleep(1)
+    # Give the launcher up to 8s to detect the signal and close cleanly
+    time.sleep(8)
+
+    # Hard fallback: if webview didn't close for some reason, force exit
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."

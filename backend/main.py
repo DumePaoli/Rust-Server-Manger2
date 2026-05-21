@@ -16,6 +16,7 @@ from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
 from messages import MessageScheduler, load_messages, save_messages
 from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
+from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -77,12 +78,16 @@ async def get_status():
 async def start_server():
     config = load_config()
     ok, msg = await manager.start(config)
+    if ok:
+        asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_start")
     return {"success": ok, "message": msg}
 
 
 @app.post("/api/stop")
 async def stop_server():
     ok, msg = await manager.stop()
+    if ok:
+        asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_stop")
     return {"success": ok, "message": msg}
 
 
@@ -141,6 +146,30 @@ async def console_ws(ws: WebSocket):
     finally:
         if ws in active_ws:
             active_ws.remove(ws)
+
+
+# ── Discord routes ────────────────────────────────────────────────────────
+
+@app.get("/api/discord/config")
+async def get_discord_config():
+    return load_discord_config()
+
+
+@app.put("/api/discord/config")
+async def update_discord_config(body: ConfigUpdate):
+    save_discord_config(body.data)
+    return {"success": True}
+
+
+class TestWebhookBody(BaseModel):
+    webhook_url: str
+    server_name: str = ""
+
+
+@app.post("/api/discord/test")
+async def test_discord_webhook(body: TestWebhookBody):
+    ok, err = discord.send_test(body.webhook_url, body.server_name)
+    return {"success": ok, "error": err}
 
 
 # ── Wipe routes ───────────────────────────────────────────────────────────
@@ -242,6 +271,7 @@ async def ban_player(steamid: str, body: PlayerActionBody):
     name = next((p["name"] for p in players if p["steamid"] == steamid), steamid)
     reason = body.reason or "Banned by admin"
     await manager.send_command(f"banid {steamid} \"{name}\" \"{reason}\"")
+    asyncio.get_event_loop().run_in_executor(None, lambda: discord.send_event("player_ban", name=name))
     return {"success": True}
 
 
