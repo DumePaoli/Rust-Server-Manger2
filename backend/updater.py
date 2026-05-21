@@ -144,19 +144,20 @@ def apply_update(download_url: str) -> tuple[bool, str]:
 
     # PowerShell script: wait, swap files, restart — runs fully hidden, no console flash
     ps_path = Path(str(current_exe) + "_update.ps1")
+    # Use double-quotes around paths to handle spaces in directory names
     ps = (
         "Start-Sleep -Seconds 2\n"
         "$retries = 20\n"
         "while ($retries -gt 0) {\n"
         "  try {\n"
-        f"    Move-Item -Force '{tmp_exe}' '{current_exe}'\n"
+        f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
         "    break\n"
         "  } catch {\n"
         "    Start-Sleep -Seconds 1\n"
         "    $retries--\n"
         "  }\n"
         "}\n"
-        f"Start-Process '{current_exe}'\n"
+        f'Start-Process "{current_exe}"\n'
         "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
     )
 
@@ -177,6 +178,8 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    # Kill current process — bat script will restart with new version
-    os.kill(os.getpid(), 9)
+    # Give the subprocess a moment to fully start before we exit
+    time.sleep(0.8)
+    # os._exit bypasses Python cleanup and kills the process reliably from any thread on Windows
+    os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
