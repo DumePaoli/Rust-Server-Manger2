@@ -1,0 +1,90 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pywebview pyinstaller
+
+      - name: Build .exe with PyInstaller
+        run: |
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --name "RustServerManager" `
+            --add-data "backend;backend" `
+            --add-data "frontend/dist;frontend/dist" `
+            --hidden-import uvicorn.logging `
+            --hidden-import uvicorn.loops `
+            --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols `
+            --hidden-import uvicorn.protocols.http `
+            --hidden-import uvicorn.protocols.http.auto `
+            --hidden-import uvicorn.protocols.http.h11_impl `
+            --hidden-import uvicorn.protocols.websockets `
+            --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.protocols.websockets.websockets_impl `
+            --hidden-import uvicorn.lifespan `
+            --hidden-import uvicorn.lifespan.on `
+            --hidden-import fastapi `
+            --hidden-import fastapi.middleware.cors `
+            --hidden-import fastapi.staticfiles `
+            --hidden-import fastapi.responses `
+            --hidden-import psutil `
+            --hidden-import aiofiles `
+            --hidden-import websockets `
+            --hidden-import webview `
+            --collect-all uvicorn `
+            --collect-all fastapi `
+            --collect-all webview `
+            launcher.py
+
+      - name: Extract changelog from tag message
+        id: changelog
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          MSG=$(git tag -l --format='%(contents)' "$TAG" | head -50)
+          if [ -z "$MSG" ]; then
+            MSG="Release $TAG"
+          fi
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Rust Server Manager ${{ github.ref_name }}"
+          body: ${{ steps.changelog.outputs.body }}
+          files: dist/RustServerManager.exe
+          draft: false
+          prerelease: false
