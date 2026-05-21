@@ -13,14 +13,19 @@ from config import load_config, save_config
 from server_manager import ServerManager
 from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
+from messages import MessageScheduler, load_messages, save_messages
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
+scheduler = MessageScheduler()
+scheduler.set_send_fn(manager.send_command)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    scheduler.start()
     yield
+    scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -130,6 +135,68 @@ async def console_ws(ws: WebSocket):
     finally:
         if ws in active_ws:
             active_ws.remove(ws)
+
+
+# ── Messages routes ───────────────────────────────────────────────────────
+
+@app.get("/api/messages")
+async def get_messages():
+    return load_messages()
+
+
+class MessageBody(BaseModel):
+    text: str
+    interval_minutes: int = 5
+    enabled: bool = True
+    color: str = ""
+
+
+@app.post("/api/messages")
+async def create_message(body: MessageBody):
+    import uuid
+    messages = load_messages()
+    msg = {
+        "id": str(uuid.uuid4()),
+        "text": body.text,
+        "interval_minutes": body.interval_minutes,
+        "enabled": body.enabled,
+        "color": body.color,
+    }
+    messages.append(msg)
+    save_messages(messages)
+    return msg
+
+
+@app.put("/api/messages/{mid}")
+async def update_message(mid: str, body: MessageBody):
+    messages = load_messages()
+    for m in messages:
+        if m["id"] == mid:
+            m["text"] = body.text
+            m["interval_minutes"] = body.interval_minutes
+            m["enabled"] = body.enabled
+            m["color"] = body.color
+            save_messages(messages)
+            return m
+    return {"error": "Not found"}, 404
+
+
+@app.delete("/api/messages/{mid}")
+async def delete_message(mid: str):
+    messages = load_messages()
+    messages = [m for m in messages if m["id"] != mid]
+    save_messages(messages)
+    return {"success": True}
+
+
+@app.post("/api/messages/{mid}/test")
+async def test_message(mid: str):
+    messages = load_messages()
+    for m in messages:
+        if m["id"] == mid:
+            await manager.send_command(f"say {m['text']}")
+            return {"success": True}
+    return {"success": False, "error": "Not found"}
 
 
 # ── Update routes ─────────────────────────────────────────────────────────

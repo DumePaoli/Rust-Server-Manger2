@@ -10,6 +10,7 @@ import PlayersPage from "./pages/PlayersPage";
 import WipePage from "./pages/WipePage";
 import InstallerPage from "./pages/InstallerPage";
 import AppSettings from "./pages/AppSettings";
+import MessagesPage from "./pages/MessagesPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 
 function ComingSoon({ title }) {
@@ -44,7 +45,7 @@ export default function App() {
           <Route path="/wipe" element={<WipePage />} />
           <Route path="/installer" element={<InstallerPage />} />
           <Route path="/app-settings" element={<AppSettings />} />
-          <Route path="/messages" element={<ComingSoon title="Messages" />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/times" element={<ComingSoon title="Times" />} />
           <Route path="/discord" element={<ComingSoon title="Discord Integration" />} />
         </Routes>

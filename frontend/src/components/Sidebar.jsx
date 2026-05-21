@@ -13,7 +13,7 @@ const NAV = [
   { to: "/wipe", icon: Trash2, label: "Wipe Manager" },
   { to: "/settings", icon: Settings, label: "Server Settings" },
   { divider: true },
-  { to: "/messages", icon: MessageSquare, label: "Messages", soon: true },
+  { to: "/messages", icon: MessageSquare, label: "Messages" },
   { to: "/times", icon: Clock, label: "Times", soon: true },
   { to: "/discord", icon: MessageSquare, label: "Discord", soon: true },
   { divider: true },
