@@ -20,6 +20,7 @@ DEFAULT_CONFIG = {
     "server_description": "A Rust server managed by RustManager",
     "server_url": "",
     "server_logo_url": "",
+    "server_app_logo_url": "",
     "server_tags": [],
     "admin_steamid": "",
     # Network

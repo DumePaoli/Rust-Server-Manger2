@@ -183,10 +183,17 @@ export default function ServerSettings() {
 
             {/* Row 2: Logo + Tags */}
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Logo URL" hint="1024×512 recommended">
-                <input className="input font-mono text-xs" value={config.server_logo_url || ""}
-                  onChange={e => set("server_logo_url", e.target.value)}
-                  placeholder="https://..." />
+              <Field label="Logo" hint="1024×512">
+                <div className="flex gap-2 items-center">
+                  {config.server_logo_url && (
+                    <img src={config.server_logo_url} alt="logo"
+                      className="h-9 w-16 rounded object-cover shrink-0 border border-surface-500"
+                      onError={e => { e.target.style.display = "none"; }} />
+                  )}
+                  <input className="input font-mono text-xs flex-1" value={config.server_logo_url || ""}
+                    onChange={e => set("server_logo_url", e.target.value)}
+                    placeholder="https://…/logo.png" />
+                </div>
               </Field>
               <Field label="Tags">
                 <div className="space-y-2">
@@ -198,11 +205,8 @@ export default function ServerSettings() {
                       onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTag(tagInput); } }}
                       placeholder="Add a tag…"
                     />
-                    <select
-                      className="input w-32 text-sm"
-                      value=""
-                      onChange={e => { if (e.target.value) addTag(e.target.value); }}
-                    >
+                    <select className="input w-32 text-sm" value=""
+                      onChange={e => { if (e.target.value) addTag(e.target.value); }}>
                       <option value="">Quick add</option>
                       {COMMON_TAGS.filter(t => !tags.includes(t)).map(t => (
                         <option key={t} value={t}>{t}</option>
@@ -227,21 +231,26 @@ export default function ServerSettings() {
               </Field>
             </div>
 
-            {/* Row 3: Web URL + RCON password */}
+            {/* Row 3: App Logo + RCON password */}
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Web URL">
-                <input className="input font-mono text-sm" value={config.server_url || ""}
-                  onChange={e => set("server_url", e.target.value)}
-                  placeholder="https://your-website.com" />
+              <Field label="App Logo" hint="256×256">
+                <div className="flex gap-2 items-center">
+                  {config.server_app_logo_url && (
+                    <img src={config.server_app_logo_url} alt="app logo"
+                      className="h-9 w-9 rounded object-cover shrink-0 border border-surface-500"
+                      onError={e => { e.target.style.display = "none"; }} />
+                  )}
+                  <input className="input font-mono text-xs flex-1" value={config.server_app_logo_url || ""}
+                    onChange={e => set("server_app_logo_url", e.target.value)}
+                    placeholder="https://…/applogo.png" />
+                </div>
               </Field>
               <Field label="RCON Password">
                 <div className="flex gap-2">
-                  <input
-                    className="input flex-1 font-mono"
+                  <input className="input flex-1 font-mono"
                     type={showRcon ? "text" : "password"}
                     value={config.rcon_password}
-                    onChange={e => set("rcon_password", e.target.value)}
-                  />
+                    onChange={e => set("rcon_password", e.target.value)} />
                   <button type="button" onClick={() => setShowRcon(v => !v)}
                     className="btn-secondary px-3" title={showRcon ? "Hide" : "Show"}>
                     {showRcon ? <EyeOff size={14} /> : <Eye size={14} />}
@@ -250,18 +259,25 @@ export default function ServerSettings() {
               </Field>
             </div>
 
-            {/* Row 4: Max players + SteamID */}
+            {/* Row 4: Web URL + Max Players + SteamID */}
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Max Players">
-                <input className="input" type="number" min={1} max={500}
-                  value={config.max_players}
-                  onChange={e => set("max_players", Number(e.target.value))} />
+              <Field label="Web URL">
+                <input className="input font-mono text-sm" value={config.server_url || ""}
+                  onChange={e => set("server_url", e.target.value)}
+                  placeholder="https://your-website.com" />
               </Field>
-              <Field label="Your SteamID (Admin)">
-                <input className="input font-mono" value={config.admin_steamid || ""}
-                  onChange={e => set("admin_steamid", e.target.value)}
-                  placeholder="76561198…" />
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Max Players">
+                  <input className="input" type="number" min={1} max={500}
+                    value={config.max_players}
+                    onChange={e => set("max_players", Number(e.target.value))} />
+                </Field>
+                <Field label="Admin SteamID">
+                  <input className="input font-mono text-xs" value={config.admin_steamid || ""}
+                    onChange={e => set("admin_steamid", e.target.value)}
+                    placeholder="76561198…" />
+                </Field>
+              </div>
             </div>
 
             {/* Map section: 3 columns */}
