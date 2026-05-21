@@ -50,6 +50,8 @@ DEFAULT_CONFIG = {
     "hardcore": False,
     # Modding
     "oxide_enabled": False,
+    # Wipe
+    "server_data_path": "",
     # Advanced
     "auto_update": True,
     "auto_wipe_map": False,

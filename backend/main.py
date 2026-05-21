@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional
 from pathlib import Path
 
 from config import load_config, save_config
@@ -14,18 +15,23 @@ from server_manager import ServerManager
 from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
 from messages import MessageScheduler, load_messages, save_messages
+from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
 scheduler = MessageScheduler()
 scheduler.set_send_fn(manager.send_command)
+wipe_scheduler = WipeScheduler()
+wipe_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
+    wipe_scheduler.start()
     yield
     scheduler.stop()
+    wipe_scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -135,6 +141,81 @@ async def console_ws(ws: WebSocket):
     finally:
         if ws in active_ws:
             active_ws.remove(ws)
+
+
+# ── Wipe routes ───────────────────────────────────────────────────────────
+
+@app.get("/api/wipe/status")
+async def wipe_status():
+    data = load_wipe_data()
+    secs = seconds_until_wipe(data.get("next_wipe"))
+    return {**data, "seconds_until_wipe": secs}
+
+
+class WipeScheduleBody(BaseModel):
+    next_wipe: Optional[str] = None
+    wipe_type: str = "map"
+    recurrence: str = "none"
+    warnings: list = [30, 10, 5, 1]
+
+
+@app.post("/api/wipe/schedule")
+async def set_wipe_schedule(body: WipeScheduleBody):
+    data = load_wipe_data()
+    data["next_wipe"] = body.next_wipe
+    data["wipe_type"] = body.wipe_type
+    data["recurrence"] = body.recurrence
+    data["warnings"] = body.warnings
+    save_wipe_data(data)
+    wipe_scheduler._warned.clear()
+    return {"success": True}
+
+
+@app.delete("/api/wipe/schedule")
+async def cancel_wipe_schedule():
+    data = load_wipe_data()
+    data["next_wipe"] = None
+    save_wipe_data(data)
+    return {"success": True}
+
+
+class WipeNowBody(BaseModel):
+    wipe_type: str = "map"
+
+
+@app.post("/api/wipe/now")
+async def wipe_now(body: WipeNowBody):
+    config = load_config()
+    data_path = config.get("server_data_path", "")
+    if not data_path:
+        return {"success": False, "error": "server_data_path non configuré dans Advanced Settings"}
+
+    from wipe import _delete_server_files
+    from datetime import datetime, timezone
+
+    if manager.is_running:
+        await manager.send_command("say [WIPE] Wipe manuel — le serveur redémarre...")
+        await asyncio.sleep(3)
+        await manager.stop()
+        await asyncio.sleep(3)
+
+    deleted, errors = _delete_server_files(data_path, body.wipe_type)
+
+    wipe_data = load_wipe_data()
+    history = wipe_data.get("history", [])
+    history.insert(0, {
+        "date": datetime.now(timezone.utc).isoformat(),
+        "type": body.wipe_type,
+        "files_deleted": deleted,
+        "errors": errors,
+        "manual": True,
+    })
+    wipe_data["history"] = history[:50]
+    save_wipe_data(wipe_data)
+
+    await asyncio.sleep(2)
+    await manager.start(config)
+    return {"success": True, "files_deleted": deleted, "errors": errors}
 
 
 # ── Players routes ────────────────────────────────────────────────────────

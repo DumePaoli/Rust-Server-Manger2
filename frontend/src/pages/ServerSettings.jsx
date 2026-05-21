@@ -423,6 +423,12 @@ export default function ServerSettings() {
                   <input className="input font-mono" value={config.server_identity}
                     onChange={e => set("server_identity", e.target.value)} />
                 </Field>
+                <Field label="Server Data Path" span2>
+                  <input className="input font-mono text-sm" value={config.server_data_path || ""}
+                    onChange={e => set("server_data_path", e.target.value)}
+                    placeholder="C:\RustServer\server\rust_server\" />
+                  <p className="text-xs text-gray-600 mt-1">Dossier contenant les fichiers .sav et .db — utilisé pour les wipes automatiques.</p>
+                </Field>
               </div>
               <div className="border-t border-surface-600 pt-4 space-y-3">
                 <ToggleRow label="Auto Update Server" desc="Update server on startup if needed"
