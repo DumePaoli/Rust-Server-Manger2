@@ -137,6 +137,46 @@ async def console_ws(ws: WebSocket):
             active_ws.remove(ws)
 
 
+# ── Players routes ────────────────────────────────────────────────────────
+
+@app.get("/api/players")
+async def get_players():
+    return manager.players.get_players()
+
+
+class PlayerActionBody(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/players/{steamid}/kick")
+async def kick_player(steamid: str, body: PlayerActionBody):
+    reason = body.reason or "Kicked by admin"
+    await manager.send_command(f"kick {steamid} \"{reason}\"")
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/ban")
+async def ban_player(steamid: str, body: PlayerActionBody):
+    players = manager.players.get_players()
+    name = next((p["name"] for p in players if p["steamid"] == steamid), steamid)
+    reason = body.reason or "Banned by admin"
+    await manager.send_command(f"banid {steamid} \"{name}\" \"{reason}\"")
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/mute")
+async def mute_player(steamid: str):
+    await manager.send_command(f"mute {steamid}")
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/message")
+async def message_player(steamid: str, body: PlayerActionBody):
+    if body.reason:
+        await manager.send_command(f"say {body.reason}")
+    return {"success": True}
+
+
 # ── Messages routes ───────────────────────────────────────────────────────
 
 @app.get("/api/messages")

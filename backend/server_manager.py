@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import psutil
+from players import PlayerManager
 
 
 @dataclass
@@ -28,6 +29,7 @@ class ServerManager:
         self._console_log: list[str] = []
         self._log_callbacks: list[Callable[[str], None]] = []
         self._read_task: Optional[asyncio.Task] = None
+        self.players = PlayerManager()
 
     def add_log_callback(self, cb: Callable[[str], None]) -> None:
         self._log_callbacks.append(cb)
@@ -43,6 +45,7 @@ class ServerManager:
         self._console_log.append(entry)
         if len(self._console_log) > 500:
             self._console_log = self._console_log[-500:]
+        self.players.on_log_line(line)
         for cb in self._log_callbacks:
             try:
                 cb(entry)
@@ -94,6 +97,7 @@ class ServerManager:
             self._started_at = datetime.now()
             # We use a fake process sentinel
             self._process = _DemoProcess()
+            self.players.set_demo_players()
             return True, "Server started in demo mode."
 
         if not Path(executable).exists():
@@ -179,6 +183,7 @@ class ServerManager:
         if isinstance(self._process, _DemoProcess):
             self._process = None
             self._started_at = None
+            self.players.clear()
             self._emit("Demo server stopped.")
             return True, "Demo server stopped."
         try:
@@ -192,6 +197,7 @@ class ServerManager:
                 self._emit("Server stopped gracefully.")
             self._process = None
             self._started_at = None
+            self.players.clear()
             return True, "Server stopped."
         except Exception as e:
             return False, str(e)
