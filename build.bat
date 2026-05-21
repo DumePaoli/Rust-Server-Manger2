@@ -2,6 +2,35 @@
 echo === Rust Server Manager - Build EXE ===
 echo.
 
+REM ── Detect Python 3.11 ───────────────────────────────────────────────────
+set PYTHON=
+for %%P in (py python3.11 python) do (
+    if not defined PYTHON (
+        %%P -c "import sys; exit(0 if sys.version_info[:2]==(3,11) else 1)" 2>nul && set PYTHON=%%P
+    )
+)
+
+REM Try py launcher with explicit version
+if not defined PYTHON (
+    py -3.11 --version >nul 2>&1 && set PYTHON=py -3.11
+)
+
+if not defined PYTHON (
+    echo.
+    echo ERREUR: Python 3.11 est requis mais introuvable.
+    echo.
+    echo Telechargez-le ici:
+    echo https://www.python.org/downloads/release/python-3119/
+    echo.
+    echo Lors de l'installation, cochez "Add Python to PATH".
+    echo Puis relancez ce script.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo Utilisation de Python: %PYTHON%
+
 REM 1. Build React frontend
 echo [1/3] Building frontend...
 cd frontend
@@ -10,8 +39,10 @@ call npm run build
 cd ..
 echo       Done.
 
-REM 2. Install Python dependencies
+REM 2. Install Python dependencies in a virtual environment
 echo [2/3] Installing Python dependencies...
+%PYTHON% -m venv .venv
+call .venv\Scripts\activate.bat
 pip install -r backend/requirements.txt -q
 pip install pywebview pyinstaller -q
 echo       Done.
