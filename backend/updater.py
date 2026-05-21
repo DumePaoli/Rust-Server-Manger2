@@ -178,8 +178,22 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    # Give the subprocess a moment to fully start before we exit
-    time.sleep(0.8)
-    # os._exit bypasses Python cleanup and kills the process reliably from any thread on Windows
+    time.sleep(0.5)
+
+    # Use taskkill to kill this process from an external process — the most
+    # reliable way to exit on Windows from a background thread inside PyInstaller.
+    pid = os.getpid()
+    try:
+        subprocess.Popen(
+            ["taskkill", "/F", "/PID", str(pid)],
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
+    # Fallback in case taskkill is slow
+    time.sleep(1)
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
