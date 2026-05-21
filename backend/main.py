@@ -13,6 +13,7 @@ from config import load_config, save_config
 from server_manager import ServerManager
 from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
+import installer as installer_mod
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -155,6 +156,39 @@ async def apply_update_route():
     import asyncio
     asyncio.get_event_loop().run_in_executor(None, apply_update, url)
     return {"success": True, "message": "Téléchargement en cours…"}
+
+
+# ── Installer routes ──────────────────────────────────────────────────────
+
+@app.get("/api/installer/status")
+async def installer_status():
+    return installer_mod.get_status()
+
+
+@app.get("/api/installer/progress")
+async def installer_progress():
+    return installer_mod.get_progress()
+
+
+class DownloadSteamCMDBody(BaseModel):
+    install_dir: str
+
+
+@app.post("/api/installer/steamcmd/download")
+async def download_steamcmd(body: DownloadSteamCMDBody):
+    installer_mod.start_download_steamcmd(body.install_dir)
+    return {"success": True, "message": "Téléchargement démarré…"}
+
+
+class InstallServerBody(BaseModel):
+    steamcmd_path: str
+    server_dir: str
+
+
+@app.post("/api/installer/server/install")
+async def install_server(body: InstallServerBody):
+    installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
+    return {"success": True, "message": "Installation démarrée…"}
 
 
 # ── Serve React build ──────────────────────────────────────────────────────
