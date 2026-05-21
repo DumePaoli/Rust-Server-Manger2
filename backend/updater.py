@@ -132,8 +132,8 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, "La mise à jour automatique est supportée sur Windows uniquement."
 
     current_exe = Path(sys.executable)
-    tmp_exe     = Path(str(current_exe) + ".update")
-    bat_path    = Path(str(current_exe) + "_update.bat")
+    tmp_exe  = Path(str(current_exe) + ".update")
+    ps_path  = Path(str(current_exe) + "_update.ps1")
 
     try:
         urllib.request.urlretrieve(download_url, str(tmp_exe), reporthook=_progress.hook)
@@ -142,27 +142,35 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # Batch script: wait for current process to exit, swap files, restart
-    bat = (
-        "@echo off\r\n"
-        "echo Mise a jour en cours...\r\n"
-        "timeout /t 2 /nobreak > nul\r\n"
-        ":retry\r\n"
-        f'move /y "{tmp_exe}" "{current_exe}"\r\n'
-        "if errorlevel 1 (\r\n"
-        "  timeout /t 1 /nobreak > nul\r\n"
-        "  goto retry\r\n"
-        ")\r\n"
-        f'start "" "{current_exe}"\r\n'
-        'del "%~f0"\r\n'
+    # PowerShell script: wait, swap files, restart — runs fully hidden, no console flash
+    ps_path = Path(str(current_exe) + "_update.ps1")
+    ps = (
+        "Start-Sleep -Seconds 2\n"
+        "$retries = 20\n"
+        "while ($retries -gt 0) {\n"
+        "  try {\n"
+        f"    Move-Item -Force '{tmp_exe}' '{current_exe}'\n"
+        "    break\n"
+        "  } catch {\n"
+        "    Start-Sleep -Seconds 1\n"
+        "    $retries--\n"
+        "  }\n"
+        "}\n"
+        f"Start-Process '{current_exe}'\n"
+        "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
     )
 
     try:
-        bat_path.write_text(bat, encoding="utf-8")
-        # DETACHED_PROCESS | CREATE_NO_WINDOW
+        ps_path.write_text(ps, encoding="utf-8")
         subprocess.Popen(
-            ["cmd", "/c", str(bat_path)],
-            creationflags=0x00000008 | 0x08000000,
+            [
+                "powershell",
+                "-WindowStyle", "Hidden",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", str(ps_path),
+            ],
+            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
         )
     except Exception as exc:
         _progress.error = str(exc)
