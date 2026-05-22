@@ -35,11 +35,9 @@ class UpdateChecker:
         self._cache_ts: float = 0
 
     def check(self, force: bool = False) -> dict:
-        """Return update info dict. Uses in-memory cache to avoid hammering the API."""
         now = time.time()
         if not force and self._cache and (now - self._cache_ts) < self.CACHE_TTL:
             return self._cache
-
         result = self._fetch()
         self._cache = result
         self._cache_ts = now
@@ -76,7 +74,6 @@ class UpdateChecker:
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                # No releases yet — silent, not an error
                 return self._no_update()
             return {"available": False, "current_version": self.current_version, "error": f"HTTP {e.code}"}
         except Exception as exc:
@@ -121,8 +118,15 @@ def get_download_progress() -> dict:
     }
 
 
+def _ssl_opener():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+
+
 def apply_update(download_url: str) -> tuple[bool, str]:
-    """Download the new .exe and schedule self-replacement via PowerShell (Windows only)."""
+    """Download new .exe and launch VBScript replacer (Windows only)."""
     global _progress
     _progress = DownloadProgress()
 
@@ -136,92 +140,130 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, "La mise à jour automatique est supportée sur Windows uniquement."
 
     current_exe = Path(sys.executable)
-    tmp_exe = Path(str(current_exe) + ".update")
+    tmp_exe = current_exe.parent / (current_exe.stem + ".update.exe")
+    vbs_path = current_exe.parent / (current_exe.stem + "_updater.vbs")
+    log_path = current_exe.parent / (current_exe.stem + "_updater.log")
+    mei_path = getattr(sys, "_MEIPASS", "")
     pid = os.getpid()
 
+    # ── 1. Download ──────────────────────────────────────────────────────────
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-        def _retrieve(url, dest, hook):
-            with opener.open(url) as src:
-                total = int(src.headers.get("Content-Length", 0))
-                block = 8192
-                count = 0
-                with open(dest, "wb") as f:
-                    while True:
-                        chunk = src.read(block)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        count += 1
-                        hook(count, block, total)
-        _retrieve(download_url, str(tmp_exe), _progress.hook)
+        opener = _ssl_opener()
+        with opener.open(download_url) as src:
+            total = int(src.headers.get("Content-Length", 0))
+            block = 65536
+            count = 0
+            with open(str(tmp_exe), "wb") as f:
+                while True:
+                    chunk = src.read(block)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    count += 1
+                    _progress.hook(count, block, total)
         _progress.percent = 100
     except Exception as exc:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # PowerShell script runs fully detached and windowless.
-    # It kills this process by PID — more reliable than relying on the process to exit
-    # on its own. The previous signal-file approach failed because webview.destroy() from
-    # a background thread doesn't reliably unblock webview.start() on Windows, and
-    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
-    # external TerminateProcess() call that bypasses all of that.
-    mei_path = getattr(sys, "_MEIPASS", "")
-    ps_path = Path(str(current_exe) + "_update.ps1")
-    log_path = Path(str(current_exe) + "_update.log")
-    ps = (
-        f'$log = "{log_path}"\n'
-        f'"[$(Get-Date)] Update started pid={pid}" | Out-File $log\n'
-        "Start-Sleep -Seconds 1\n"
-        f'Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n'
-        f'"[$(Get-Date)] Process stopped" | Out-File $log -Append\n'
-        "Start-Sleep -Seconds 3\n"
-        + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
-        + "$retries = 30\n"
-        "$replaced = $false\n"
-        "while ($retries -gt 0) {\n"
-        "  try {\n"
-        f'    Copy-Item -Force "{tmp_exe}" "{current_exe}"\n'
-        f'    Remove-Item -Force "{tmp_exe}" -ErrorAction SilentlyContinue\n'
-        "    $replaced = $true\n"
-        f'    "[$(Get-Date)] Replaced OK" | Out-File $log -Append\n'
-        "    break\n"
-        "  } catch {\n"
-        f'    "[$(Get-Date)] Retry $retries : $_" | Out-File $log -Append\n'
-        "    Start-Sleep -Seconds 1\n"
-        "    $retries--\n"
-        "  }\n"
-        "}\n"
-        "if ($replaced) {\n"
-        f'  Start-Process "{current_exe}"\n'
-        "} else {\n"
-        f'  "[$(Get-Date)] FAILED after all retries" | Out-File $log -Append\n'
-        "}\n"
-        "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
-    )
+    # ── 2. Write VBScript replacer ───────────────────────────────────────────
+    # VBScript avoids PowerShell execution-policy issues entirely.
+    # It polls until the original PID is gone, then copies the new exe over.
+    def esc(p: str) -> str:
+        return str(p).replace('"', '""')
+
+    vbs = f'''\
+Dim oShell, oFS, logFile
+Set oShell = CreateObject("WScript.Shell")
+Set oFS   = CreateObject("Scripting.FileSystemObject")
+Set logFile = oFS.OpenTextFile("{esc(log_path)}", 8, True)
+logFile.WriteLine Now & " updater started, waiting for PID {pid}"
+
+' Wait until original process is gone (max 30 s)
+Dim waited
+waited = 0
+Do While waited < 30
+    Dim oProc
+    On Error Resume Next
+    Set oProc = GetObject("winmgmts:{{impersonationLevel=impersonate}}!//./root/cimv2")
+    Dim col
+    Set col = oProc.ExecQuery("SELECT * FROM Win32_Process WHERE ProcessId = {pid}")
+    Dim found
+    found = (col.Count > 0)
+    On Error GoTo 0
+    If Not found Then Exit Do
+    WScript.Sleep 1000
+    waited = waited + 1
+Loop
+logFile.WriteLine Now & " process gone after " & waited & "s"
+
+' Extra wait for file handles and Defender scan
+WScript.Sleep 4000
+
+' Delete old _MEIPASS extraction folder if present
+''' + (f'''
+If oFS.FolderExists("{esc(mei_path)}") Then
+    oFS.DeleteFolder "{esc(mei_path)}", True
+End If
+''' if mei_path else '') + f'''
+' Copy new exe over old exe, retry up to 30 times
+Dim retries, replaced
+retries = 30
+replaced = False
+Do While retries > 0 And Not replaced
+    On Error Resume Next
+    oFS.CopyFile "{esc(tmp_exe)}", "{esc(current_exe)}", True
+    If Err.Number = 0 Then
+        replaced = True
+        logFile.WriteLine Now & " copy succeeded"
+    Else
+        logFile.WriteLine Now & " copy failed (retry " & retries & "): " & Err.Description
+        Err.Clear
+    End If
+    On Error GoTo 0
+    If Not replaced Then WScript.Sleep 2000
+    retries = retries - 1
+Loop
+
+If replaced Then
+    ' Clean up temp file
+    On Error Resume Next
+    oFS.DeleteFile "{esc(tmp_exe)}", True
+    On Error GoTo 0
+    ' Relaunch
+    logFile.WriteLine Now & " launching " & "{esc(current_exe)}"
+    logFile.Close
+    oShell.Run Chr(34) & "{esc(current_exe)}" & Chr(34), 1, False
+Else
+    logFile.WriteLine Now & " FAILED: gave up after all retries"
+    logFile.Close
+End If
+
+' Self-delete
+WScript.Sleep 1000
+On Error Resume Next
+oFS.DeleteFile WScript.ScriptFullName, True
+'''
 
     try:
-        ps_path.write_text(ps, encoding="utf-8")
+        vbs_path.write_text(vbs, encoding="utf-8")
+    except Exception as exc:
+        _progress.error = str(exc)
+        return False, f"Impossible d'écrire le script de mise à jour : {exc}"
+
+    # ── 3. Launch VBScript detached via wscript.exe ──────────────────────────
+    try:
         subprocess.Popen(
-            [
-                "powershell",
-                "-WindowStyle", "Hidden",
-                "-NonInteractive",
-                "-ExecutionPolicy", "Bypass",
-                "-File", str(ps_path),
-            ],
-            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
+            ["wscript.exe", str(vbs_path)],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+            close_fds=True,
         )
     except Exception as exc:
         _progress.error = str(exc)
-        return False, f"Échec du script de remplacement : {exc}"
+        return False, f"Impossible de lancer le script de remplacement : {exc}"
 
     _progress.done = True
-    # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
+    # Give the frontend time to read progress.done, then exit.
     time.sleep(3)
-    # Hard fallback in case Stop-Process didn't fire
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
