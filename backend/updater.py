@@ -118,7 +118,7 @@ def get_download_progress() -> dict:
 
 
 def apply_update(download_url: str) -> tuple[bool, str]:
-    """Download the new .exe and schedule self-replacement via a .bat script (Windows only)."""
+    """Download the new .exe and schedule self-replacement via PowerShell (Windows only)."""
     global _progress
     _progress = DownloadProgress()
 
@@ -132,8 +132,8 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, "La mise à jour automatique est supportée sur Windows uniquement."
 
     current_exe = Path(sys.executable)
-    tmp_exe  = Path(str(current_exe) + ".update")
-    ps_path  = Path(str(current_exe) + "_update.ps1")
+    tmp_exe = Path(str(current_exe) + ".update")
+    pid = os.getpid()
 
     try:
         urllib.request.urlretrieve(download_url, str(tmp_exe), reporthook=_progress.hook)
@@ -142,10 +142,16 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # PowerShell script: wait, swap files, restart — runs fully hidden, no console flash
+    # PowerShell script runs fully detached and windowless.
+    # It kills this process by PID — more reliable than relying on the process to exit
+    # on its own. The previous signal-file approach failed because webview.destroy() from
+    # a background thread doesn't reliably unblock webview.start() on Windows, and
+    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
+    # external TerminateProcess() call that bypasses all of that.
     ps_path = Path(str(current_exe) + "_update.ps1")
-    # Use double-quotes around paths to handle spaces in directory names
     ps = (
+        "Start-Sleep -Seconds 1\n"
+        f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
         "Start-Sleep -Seconds 2\n"
         "$retries = 20\n"
         "while ($retries -gt 0) {\n"
@@ -178,21 +184,8 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    time.sleep(0.5)
-
-    # Write the shutdown signal file — the launcher's watcher thread will
-    # detect it and call webview.destroy(), causing a clean process exit.
-    # This is far more reliable than os._exit() from a background thread.
-    config_dir = os.environ.get("RSM_CONFIG_DIR", str(current_exe.parent))
-    signal_path = Path(config_dir) / ".shutdown_signal"
-    try:
-        signal_path.touch()
-    except Exception:
-        pass
-
-    # Give the launcher up to 8s to detect the signal and close cleanly
-    time.sleep(8)
-
-    # Hard fallback: if webview didn't close for some reason, force exit
+    # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
+    time.sleep(3)
+    # Hard fallback in case Stop-Process didn't fire
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
