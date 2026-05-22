@@ -15,6 +15,7 @@ const FR = {
   "Discord": "Discord",
   "App Settings": "Réglages",
   "Installer": "Installateur",
+  "Servers": "Serveurs",
 };
 
 export function t(key, lang) {

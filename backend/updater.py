@@ -142,30 +142,31 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # sys._MEIPASS is the temp extraction dir (e.g. _MEI289042).
-    # After TerminateProcess the dir stays on disk. If the new exe computes the
-    # same folder hash it would try to reuse stale/locked files → DLL load failure.
-    # We tell PowerShell to delete it before launching the new exe.
+    # PowerShell script runs fully detached and windowless.
+    # It kills this process by PID — more reliable than relying on the process to exit
+    # on its own. The previous signal-file approach failed because webview.destroy() from
+    # a background thread doesn't reliably unblock webview.start() on Windows, and
+    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
+    # external TerminateProcess() call that bypasses all of that.
     mei_path = getattr(sys, "_MEIPASS", "")
-
     ps_path = Path(str(current_exe) + "_update.ps1")
     ps = (
-        "Start-Sleep -Seconds 4\n"
-        "$max = 30\n"
-        "for ($i = 0; $i -lt $max; $i++) {\n"
-        f'  if (Test-Path "{tmp_exe}") {{\n'
-        "    try {\n"
-        f'      Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
-        "      break\n"
-        "    } catch {\n"
-        "      Start-Sleep -Seconds 1\n"
-        "    }\n"
-        "  } else { break }\n"
-        "}\n"
-        # Delete the old PyInstaller extraction dir so the new exe always extracts fresh
+        "Start-Sleep -Seconds 1\n"
+        f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
+        "Start-Sleep -Seconds 2\n"
         + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
-        + f'Start-Process "{current_exe}"\n'
-        "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
+        + "$retries = 20\n"
+        "while ($retries -gt 0) {\n"
+        "  try {\n"
+        f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
+        "    break\n"
+        "  } catch {\n"
+        "    Start-Sleep -Seconds 1\n"
+        "    $retries--\n"
+        "  }\n"
+        "}\n"
+        f'Start-Process "{current_exe}"\n'
+        "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
     )
 
     try:
@@ -178,26 +179,15 @@ def apply_update(download_url: str) -> tuple[bool, str]:
                 "-ExecutionPolicy", "Bypass",
                 "-File", str(ps_path),
             ],
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
         )
     except Exception as exc:
         _progress.error = str(exc)
         return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    # Give the frontend ~1 s to read progress.done = True, then kill the process.
-    time.sleep(1)
-
-    # TerminateProcess via ctypes is the most direct Win32 kill — it skips all DLL
-    # cleanup (Edge WebView2, etc.) that can cause os._exit / ExitProcess to hang.
-    try:
-        import ctypes
-        ctypes.windll.kernel32.TerminateProcess(
-            ctypes.windll.kernel32.GetCurrentProcess(), 0
-        )
-    except Exception:
-        pass
-
-    # Absolute fallback
+    # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
+    time.sleep(3)
+    # Hard fallback in case Stop-Process didn't fire
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."

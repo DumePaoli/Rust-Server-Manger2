@@ -101,3 +101,36 @@ def remove_plugin(config: dict, name: str) -> tuple[bool, str]:
             os.unlink(p)
             return True, f"{name} supprimé"
     return False, "Fichier plugin introuvable"
+
+
+def _get_umod_plugin_info(name: str) -> Optional[dict]:
+    url = f"https://umod.org/plugins/{name}.json"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "RustServerManager/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return json.loads(resp.read().decode())
+    except Exception:
+        return None
+
+
+def check_updates(config: dict) -> list:
+    installed = list_installed(config)
+    results = []
+    for p in installed.get("plugins", []):
+        if not p.get("version"):
+            continue
+        info = _get_umod_plugin_info(p["name"])
+        if not info:
+            continue
+        latest = info.get("latest_release_version") or info.get("version_formatted")
+        if not latest:
+            continue
+        if latest.strip() != p["version"].strip():
+            results.append({
+                "name": p["name"],
+                "filename": p["filename"],
+                "installed_version": p["version"],
+                "latest_version": latest,
+                "download_url": info.get("download_url") or f"https://umod.org/plugins/{p['name']}.cs",
+            })
+    return results

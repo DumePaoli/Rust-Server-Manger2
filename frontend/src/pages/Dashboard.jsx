@@ -4,7 +4,7 @@ import axios from "axios";
 import { startServer, stopServer, restartServer, getConfig } from "../api/client";
 import {
   Play, Square, RotateCcw, Cpu, HardDrive, Clock,
-  Users, Server, Activity, Terminal, Trash2, Settings,
+  Users, Server, Activity, Terminal, Trash2, Settings, Map, ExternalLink,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -122,6 +122,7 @@ export default function Dashboard() {
   const [cpuHistory, setCpuHistory]         = useState([]);
   const [ramHistory, setRamHistory]         = useState([]);
   const [playersHistory, setPlayersHistory] = useState([]);
+  const [mapInfo, setMapInfo]               = useState(null);
 
   const wipeRef = useRef(null);
 
@@ -167,18 +168,26 @@ export default function Dashboard() {
     } catch { }
   }, []);
 
+  const fetchMapInfo = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BASE}/api/map/info`);
+      setMapInfo(data);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     getConfig().then(setConfig).catch(() => { });
-    fetchStatus(); fetchPlayers(); fetchWipe(); fetchConsole(); fetchMetrics();
+    fetchStatus(); fetchPlayers(); fetchWipe(); fetchConsole(); fetchMetrics(); fetchMapInfo();
     const intervals = [
       setInterval(fetchStatus, 3000),
       setInterval(fetchPlayers, 10000),
       setInterval(fetchWipe, 30000),
       setInterval(fetchConsole, 5000),
       setInterval(fetchMetrics, 10000),
+      setInterval(fetchMapInfo, 60000),
     ];
     return () => intervals.forEach(clearInterval);
-  }, [fetchStatus, fetchPlayers, fetchWipe, fetchConsole, fetchMetrics]);
+  }, [fetchStatus, fetchPlayers, fetchWipe, fetchConsole, fetchMetrics, fetchMapInfo]);
 
   // Local wipe countdown tick
   useEffect(() => {
@@ -279,6 +288,42 @@ export default function Dashboard() {
           chart={ramHistory}
         />
       </div>
+
+      {/* ── Map card ── */}
+      {mapInfo && (
+        <div className="card flex items-center gap-4">
+          <div className="w-9 h-9 rounded-xl bg-surface-600 flex items-center justify-center text-rust-400 shrink-0">
+            <Map size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs text-gray-500 font-medium uppercase tracking-wide mb-0.5">Carte</div>
+            <div className="text-sm font-semibold text-gray-100">
+              {mapInfo.level} · {mapInfo.size}
+              <span className="text-gray-500 font-mono ml-2 text-xs">seed {mapInfo.seed}</span>
+            </div>
+          </div>
+          {mapInfo.rustmaps_url && (
+            <a
+              href={mapInfo.rustmaps_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-rust-600/15 text-rust-400 hover:bg-rust-600/25 transition-colors shrink-0"
+            >
+              Voir sur Rustmaps <ExternalLink size={11} />
+            </a>
+          )}
+          {mapInfo.has_local_image && (
+            <a
+              href={`${BASE}/api/map/image`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface-600 text-gray-400 hover:text-gray-200 hover:bg-surface-500 transition-colors shrink-0"
+            >
+              Image locale <ExternalLink size={11} />
+            </a>
+          )}
+        </div>
+      )}
 
       {/* ── Middle row: Server info + Wipe + Console ── */}
       <div className="grid grid-cols-3 gap-4">

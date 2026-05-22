@@ -1,6 +1,5 @@
 import re
 import time
-import random
 from typing import Optional
 
 # Patterns to detect player connects/disconnects in Rust server logs
@@ -15,19 +14,17 @@ _DISCONNECT_PATTERNS = [
     re.compile(r"\[LEAVE\]\s+(.+?)\s+\((\d{17})\)"),
 ]
 
-_DEMO_PLAYERS = [
-    {"steamid": "76561198000000001", "name": "xXRustKingXx", "ping": 42, "ip": "192.168.1.10"},
-    {"steamid": "76561198000000002", "name": "NightWalker99", "ping": 78, "ip": "10.0.0.2"},
-    {"steamid": "76561198000000003", "name": "SurvivalPro", "ping": 31, "ip": "172.16.0.5"},
-    {"steamid": "76561198000000004", "name": "fr3nch_toast", "ping": 112, "ip": "192.168.0.55"},
-    {"steamid": "76561198000000005", "name": "BuildMaster2000", "ping": 65, "ip": "10.10.1.1"},
-]
-
-
 class PlayerManager:
     def __init__(self):
-        # steamid -> player dict
         self._players: dict[str, dict] = {}
+        self._on_connect = None
+        self._on_disconnect = None
+
+    def set_connect_cb(self, cb) -> None:
+        self._on_connect = cb
+
+    def set_disconnect_cb(self, cb) -> None:
+        self._on_disconnect = cb
 
     def on_log_line(self, line: str) -> None:
         for pat in _CONNECT_PATTERNS:
@@ -43,6 +40,11 @@ class PlayerManager:
                         "connected_at": time.time(),
                         "ping": 0,
                     }
+                    if self._on_connect:
+                        try:
+                            self._on_connect(name, steamid)
+                        except Exception:
+                            pass
                 return
 
         for pat in _DISCONNECT_PATTERNS:
@@ -51,16 +53,14 @@ class PlayerManager:
                 groups = m.groups()
                 steamid = next((g for g in groups if g and len(g) == 17 and g.isdigit()), None)
                 if steamid and steamid in self._players:
+                    player_name = self._players[steamid].get("name", steamid)
                     del self._players[steamid]
+                    if self._on_disconnect:
+                        try:
+                            self._on_disconnect(player_name, steamid)
+                        except Exception:
+                            pass
                 return
-
-    def set_demo_players(self) -> None:
-        self._players.clear()
-        for p in _DEMO_PLAYERS:
-            self._players[p["steamid"]] = {
-                **p,
-                "connected_at": time.time() - random.randint(60, 7200),
-            }
 
     def clear(self) -> None:
         self._players.clear()

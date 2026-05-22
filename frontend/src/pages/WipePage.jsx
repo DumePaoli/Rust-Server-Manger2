@@ -116,6 +116,7 @@ export default function WipePage() {
   const [wipeType, setWipeType] = useState("map");
   const [recurrence, setRecurrence] = useState("none");
   const [warnings, setWarnings] = useState([30, 10, 5, 1]);
+  const [dayWarnings, setDayWarnings] = useState([7, 3, 1]);
 
   const countdownRef = useRef(null);
 
@@ -152,14 +153,15 @@ export default function WipePage() {
       setWipeType(status.wipe_type || "map");
       setRecurrence(status.recurrence || "none");
       setWarnings(status.warnings || [30, 10, 5, 1]);
+      setDayWarnings(status.day_warnings || [7, 3, 1]);
     } else {
-      // Default: tomorrow same time
       const d = new Date();
       d.setDate(d.getDate() + 1);
       setNextWipe(d.toISOString().slice(0, 16));
       setWipeType("map");
       setRecurrence("none");
       setWarnings([30, 10, 5, 1]);
+      setDayWarnings([7, 3, 1]);
     }
     setShowSchedule(true);
   };
@@ -172,6 +174,7 @@ export default function WipePage() {
         wipe_type: wipeType,
         recurrence,
         warnings,
+        day_warnings: dayWarnings,
       });
       setMsg({ type: "success", text: "Wipe planifié enregistré." });
       setShowSchedule(false);
@@ -212,6 +215,10 @@ export default function WipePage() {
 
   const toggleWarning = (min) => {
     setWarnings(w => w.includes(min) ? w.filter(x => x !== min) : [...w, min].sort((a, b) => b - a));
+  };
+
+  const toggleDayWarning = (day) => {
+    setDayWarnings(w => w.includes(day) ? w.filter(x => x !== day) : [...w, day].sort((a, b) => b - a));
   };
 
   const ct = formatCountdown(countdown);
@@ -334,9 +341,26 @@ export default function WipePage() {
             </div>
           </div>
 
-          {/* Warnings */}
+          {/* Day warnings */}
           <div>
-            <label className="label">Avertissements en jeu</label>
+            <label className="label">Annonces avancées (jours avant)</label>
+            <div className="flex flex-wrap gap-2">
+              {[14, 7, 3, 2, 1].map(day => (
+                <button key={day} type="button" onClick={() => toggleDayWarning(day)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    dayWarnings.includes(day)
+                      ? "bg-rust-600/20 border-rust-600 text-rust-400"
+                      : "bg-surface-600 border-surface-500 text-gray-500 hover:border-surface-400"
+                  }`}>
+                  {day}j avant
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Minute warnings */}
+          <div>
+            <label className="label">Avertissements finaux (minutes avant)</label>
             <div className="flex flex-wrap gap-2">
               {WARNING_OPTIONS.map(min => (
                 <button
