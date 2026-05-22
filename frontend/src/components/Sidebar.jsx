@@ -14,7 +14,7 @@ const NAV = [
   { to: "/settings", icon: Settings, label: "Server Settings" },
   { divider: true },
   { to: "/messages", icon: MessageSquare, label: "Messages" },
-  { to: "/times", icon: Clock, label: "Times", soon: true },
+  { to: "/times", icon: Clock, label: "Times" },
   { to: "/discord", icon: MessageSquare, label: "Discord" },
   { divider: true },
   { to: "/app-settings", icon: SlidersHorizontal, label: "App Settings" },

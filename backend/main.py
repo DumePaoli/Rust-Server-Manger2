@@ -18,6 +18,7 @@ from messages import MessageScheduler, load_messages, save_messages
 from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
 from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
+from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -25,15 +26,19 @@ scheduler = MessageScheduler()
 scheduler.set_send_fn(manager.send_command)
 wipe_scheduler = WipeScheduler()
 wipe_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
+time_scheduler = TimeScheduler()
+time_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
     wipe_scheduler.start()
+    time_scheduler.start()
     yield
     scheduler.stop()
     wipe_scheduler.stop()
+    time_scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -374,6 +379,91 @@ async def apply_update_route():
     import asyncio
     asyncio.get_event_loop().run_in_executor(None, apply_update, url)
     return {"success": True, "message": "Téléchargement en cours…"}
+
+
+# ── Times routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/times")
+async def get_times():
+    return load_tasks()
+
+
+class TaskBody(BaseModel):
+    name: str
+    type: str = "restart"
+    command: str = ""
+    schedule_type: str = "daily"
+    time: str = "04:00"
+    day: str = "monday"
+    interval_hours: int = 6
+    warn_minutes: list = [15, 5, 1]
+    enabled: bool = True
+
+
+@app.post("/api/times")
+async def create_task(body: TaskBody):
+    import uuid as _uuid
+    tasks = load_tasks()
+    task = {
+        "id": str(_uuid.uuid4()),
+        "name": body.name,
+        "type": body.type,
+        "command": body.command,
+        "schedule_type": body.schedule_type,
+        "time": body.time,
+        "day": body.day,
+        "interval_hours": body.interval_hours,
+        "warn_minutes": body.warn_minutes,
+        "enabled": body.enabled,
+        "last_run": None,
+        "next_run": None,
+    }
+    task["next_run"] = compute_next_run(task)
+    tasks.append(task)
+    save_tasks(tasks)
+    return task
+
+
+@app.put("/api/times/{tid}")
+async def update_task(tid: str, body: TaskBody):
+    tasks = load_tasks()
+    for t in tasks:
+        if t["id"] == tid:
+            t.update({
+                "name": body.name,
+                "type": body.type,
+                "command": body.command,
+                "schedule_type": body.schedule_type,
+                "time": body.time,
+                "day": body.day,
+                "interval_hours": body.interval_hours,
+                "warn_minutes": body.warn_minutes,
+                "enabled": body.enabled,
+            })
+            t["next_run"] = compute_next_run(t)
+            save_tasks(tasks)
+            return t
+    return {"error": "Not found"}
+
+
+@app.delete("/api/times/{tid}")
+async def delete_task(tid: str):
+    tasks = [t for t in load_tasks() if t["id"] != tid]
+    save_tasks(tasks)
+    return {"success": True}
+
+
+@app.post("/api/times/{tid}/toggle")
+async def toggle_task(tid: str):
+    tasks = load_tasks()
+    for t in tasks:
+        if t["id"] == tid:
+            t["enabled"] = not t.get("enabled", True)
+            if t["enabled"]:
+                t["next_run"] = compute_next_run(t)
+            save_tasks(tasks)
+            return t
+    return {"error": "Not found"}
 
 
 # ── Installer routes ──────────────────────────────────────────────────────
