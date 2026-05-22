@@ -148,12 +148,14 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     # a background thread doesn't reliably unblock webview.start() on Windows, and
     # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
     # external TerminateProcess() call that bypasses all of that.
+    mei_path = getattr(sys, "_MEIPASS", "")
     ps_path = Path(str(current_exe) + "_update.ps1")
     ps = (
         "Start-Sleep -Seconds 1\n"
         f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
         "Start-Sleep -Seconds 2\n"
-        "$retries = 20\n"
+        + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
+        + "$retries = 20\n"
         "while ($retries -gt 0) {\n"
         "  try {\n"
         f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
