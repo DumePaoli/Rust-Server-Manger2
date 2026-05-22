@@ -158,37 +158,71 @@ def start_download_steamcmd(install_dir: str) -> None:
     t.start()
 
 
+def _parse_progress(line: str) -> None:
+    if "progress:" in line.lower():
+        try:
+            pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
+            _progress.percent = min(99, int(float(pct_str)))
+        except Exception:
+            pass
+
+
+def _tail_log_file(log_path: str, stop_event: threading.Event) -> None:
+    """Read SteamCMD's own log file in parallel to catch buffered output."""
+    try:
+        p = Path(log_path)
+        seen = 0
+        while not stop_event.is_set():
+            if p.exists():
+                size = p.stat().st_size
+                if size > seen:
+                    with open(p, "r", encoding="utf-8", errors="replace") as f:
+                        f.seek(seen)
+                        for raw in f:
+                            line = raw.strip()
+                            if line:
+                                _progress.log(f"[log] {line}")
+                                _parse_progress(line)
+                    seen = size
+            threading.Event().wait(0.8)
+    except Exception:
+        pass
+
+
 def _run_steamcmd(steamcmd_path: str, args: list) -> int:
+    steamcmd_dir = str(Path(steamcmd_path).parent)
+    log_path = os.path.join(steamcmd_dir, "logs", "stderr.txt")
+
+    stop_tail = threading.Event()
+    tail_thread = threading.Thread(target=_tail_log_file, args=(log_path, stop_tail), daemon=True)
+    tail_thread.start()
+
     proc = subprocess.Popen(
         [steamcmd_path] + args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        bufsize=0,  # unbuffered binary
+        bufsize=0,
     )
     buf = b""
     while True:
-        chunk = proc.stdout.read(256)
+        chunk = proc.stdout.read(4096)
         if not chunk:
             break
         buf += chunk
-        # Split on \r or \n — SteamCMD uses \r for progress lines
         parts = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
-        buf = parts[-1]  # incomplete line, keep for next iteration
+        buf = parts[-1]
         for part in parts[:-1]:
             line = part.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
             _progress.log(line)
-            if "progress:" in line.lower():
-                try:
-                    pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
-                    _progress.percent = min(99, int(float(pct_str)))
-                except Exception:
-                    pass
-    # flush remaining buffer
+            _parse_progress(line)
     if buf.strip():
         _progress.log(buf.decode("utf-8", errors="replace").strip())
+
     proc.wait()
+    stop_tail.set()
+    tail_thread.join(timeout=2)
     return proc.returncode
 
 
