@@ -28,6 +28,7 @@ import bans as bans_mod
 from chat_log import chat_log
 import oxide_perms as oxide_mod
 from multi_server import registry
+import whitelist as whitelist_mod
 
 
 class _ManagerProxy:
@@ -286,6 +287,7 @@ class WipeScheduleBody(BaseModel):
     wipe_type: str = "map"
     recurrence: str = "none"
     warnings: list = [30, 10, 5, 1]
+    day_warnings: list = [7, 3, 1]
 
 
 @app.post("/api/wipe/schedule")
@@ -295,6 +297,7 @@ async def set_wipe_schedule(body: WipeScheduleBody):
     data["wipe_type"] = body.wipe_type
     data["recurrence"] = body.recurrence
     data["warnings"] = body.warnings
+    data["day_warnings"] = body.day_warnings
     save_wipe_data(data)
     wipe_scheduler._warned.clear()
     return {"success": True}
@@ -889,6 +892,79 @@ async def get_map_image():
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Aucune image de carte trouvée")
     return FileResponse(str(img))
+
+
+# ── Whitelist routes ─────────────────────────────────────────────────────
+
+@app.get("/api/whitelist")
+async def get_whitelist():
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    return whitelist_mod.list_whitelist(config)
+
+
+class WhitelistAddBody(BaseModel):
+    steamid: str
+    name: str = ""
+
+
+@app.post("/api/whitelist")
+async def add_whitelist(body: WhitelistAddBody):
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    if manager.is_running:
+        await manager.send_command(f"whitelist.add {body.steamid}")
+    ok, msg = whitelist_mod.add_entry(config, body.steamid, body.name or body.steamid)
+    return {"success": ok, "message": msg}
+
+
+@app.delete("/api/whitelist/{steamid}")
+async def remove_whitelist(steamid: str):
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    if manager.is_running:
+        await manager.send_command(f"whitelist.remove {steamid}")
+    ok, msg = whitelist_mod.remove_entry(config, steamid)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/whitelist/toggle")
+async def toggle_whitelist():
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    new_val = not config.get("whitelist_enabled", False)
+    if manager.is_running:
+        await manager.send_command(f"server.whitelist {str(new_val).lower()}")
+    config["whitelist_enabled"] = new_val
+    if active:
+        registry.save_config(active.id, config)
+    return {"success": True, "enabled": new_val}
+
+
+# ── Plugin update routes ──────────────────────────────────────────────────
+
+@app.get("/api/plugins/updates")
+async def check_plugin_updates():
+    loop = asyncio.get_event_loop()
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    updates = await loop.run_in_executor(None, plugins_mod.check_updates, config)
+    return {"updates": updates}
+
+
+@app.post("/api/plugins/{name}/update")
+async def update_plugin(name: str):
+    loop = asyncio.get_event_loop()
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    info = await loop.run_in_executor(None, plugins_mod._get_umod_plugin_info, name)
+    if not info:
+        return {"success": False, "message": f"Plugin '{name}' introuvable sur uMod"}
+    download_url = info.get("download_url") or f"https://umod.org/plugins/{name}.cs"
+    ok, msg = await loop.run_in_executor(None, plugins_mod.install_plugin, config, download_url, name)
+    if ok and manager.is_running:
+        await manager.send_command(f"oxide.reload {name}")
+    return {"success": ok, "message": msg}
 
 
 # ── Serve React build ──────────────────────────────────────────────────────

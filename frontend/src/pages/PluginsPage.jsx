@@ -3,7 +3,7 @@ import axios from "axios";
 import {
   Package, Search, Download, RefreshCw, Trash2,
   RotateCcw, AlertCircle, Check, X, ExternalLink,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, ArrowUpCircle,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -38,6 +38,8 @@ function InstalledTab({ msg, setMsg }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState({});
+  const [updates, setUpdates] = useState({});
+  const [checking, setChecking] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,32 @@ function InstalledTab({ msg, setMsg }) {
       await axios.post(`${BASE}/api/plugins/${name}/reload`);
       flash(true, `${name} rechargé.`);
     } catch { flash(false, "Erreur lors du rechargement."); }
+    setWorking(w => ({ ...w, [name]: null }));
+  };
+
+  const checkUpdates = async () => {
+    setChecking(true);
+    try {
+      const { data: r } = await axios.get(`${BASE}/api/plugins/updates`);
+      const map = {};
+      for (const u of r.updates ?? []) map[u.name] = u;
+      setUpdates(map);
+      if ((r.updates ?? []).length === 0) flash(true, "Tous les plugins sont à jour.");
+      else flash(false, `${r.updates.length} mise(s) à jour disponible(s).`);
+    } catch { flash(false, "Impossible de vérifier les mises à jour."); }
+    setChecking(false);
+  };
+
+  const handleUpdate = async (name) => {
+    setWorking(w => ({ ...w, [name]: "update" }));
+    try {
+      const { data: r } = await axios.post(`${BASE}/api/plugins/${name}/update`);
+      if (r.success) {
+        flash(true, r.message);
+        setUpdates(u => { const c = { ...u }; delete c[name]; return c; });
+        load();
+      } else flash(false, r.message);
+    } catch { flash(false, "Erreur lors de la mise à jour."); }
     setWorking(w => ({ ...w, [name]: null }));
   };
 
@@ -96,9 +124,15 @@ function InstalledTab({ msg, setMsg }) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-xs text-gray-600 font-mono truncate">{plugins_dir}</div>
-        <button onClick={load} className="btn-secondary text-xs py-1.5">
-          <RefreshCw size={12} /> Actualiser
-        </button>
+        <div className="flex gap-2">
+          <button onClick={checkUpdates} disabled={checking} className="btn-secondary text-xs py-1.5">
+            {checking ? <RefreshCw size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />}
+            {checking ? "Vérification…" : "Vérifier MAJ"}
+          </button>
+          <button onClick={load} className="btn-secondary text-xs py-1.5">
+            <RefreshCw size={12} /> Actualiser
+          </button>
+        </div>
       </div>
 
       {plugins.length === 0 ? (
@@ -115,13 +149,29 @@ function InstalledTab({ msg, setMsg }) {
                 <Package size={16} className="text-gray-400" />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-gray-200">{p.name}</span>
                   {p.version && <span className="text-xs text-gray-500 font-mono">v{p.version}</span>}
+                  {updates[p.name] && (
+                    <span className="text-xs font-medium bg-orange-500/20 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded">
+                      v{updates[p.name].latest_version} dispo
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-gray-600">{p.filename}</div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {updates[p.name] && (
+                  <button
+                    onClick={() => handleUpdate(p.name)}
+                    disabled={!!working[p.name]}
+                    className="btn-primary text-xs py-1.5 px-2.5"
+                    title="Mettre à jour"
+                  >
+                    {working[p.name] === "update" ? <RefreshCw size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />}
+                    MAJ
+                  </button>
+                )}
                 <button
                   onClick={() => handleReload(p.name)}
                   disabled={!!working[p.name]}

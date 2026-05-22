@@ -24,6 +24,7 @@ DEFAULT_WIPE_DATA = {
     "wipe_type": "map",       # "map" | "full"
     "recurrence": "none",     # "none" | "weekly" | "biweekly" | "monthly"
     "warnings": [30, 10, 5, 1],  # minutes before wipe to warn
+    "day_warnings": [7, 3, 1],   # days before wipe to warn
     "history": [],
 }
 
@@ -132,7 +133,17 @@ class WipeScheduler:
         if secs is None:
             return
 
-        # Send warnings
+        # Day warnings (fire once when entering the day window, ±15 min)
+        for day in data.get("day_warnings", []):
+            day_secs = day * 86400
+            key = f"{nw}:day:{day}"
+            if key not in self._warned and day_secs - 900 < secs <= day_secs:
+                self._warned.add(key)
+                if self._send_fn:
+                    label = f"{day} jour{'s' if day > 1 else ''}"
+                    await self._send_fn(f"say [WIPE] Rappel : le serveur sera wipé dans {label} !")
+
+        # Minute warnings
         for warn_min in data.get("warnings", []):
             warn_secs = warn_min * 60
             key = f"{nw}:{warn_min}"

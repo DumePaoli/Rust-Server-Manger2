@@ -19,6 +19,7 @@ import BansPage from "./pages/BansPage";
 import ChatLogPage from "./pages/ChatLogPage";
 import OxidePage from "./pages/OxidePage";
 import ServersPage from "./pages/ServersPage";
+import WhitelistPage from "./pages/WhitelistPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { SettingsProvider } from "./contexts/SettingsContext";
 
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="/chat" element={<ChatLogPage />} />
           <Route path="/oxide" element={<OxidePage />} />
           <Route path="/servers" element={<ServersPage />} />
+          <Route path="/whitelist" element={<WhitelistPage />} />
         </Routes>
       </main>
 
