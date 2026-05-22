@@ -633,6 +633,12 @@ async def install_server(body: InstallServerBody):
     return {"success": True, "message": "Installation démarrée…"}
 
 
+@app.post("/api/installer/server/validate")
+async def validate_server(body: InstallServerBody):
+    installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
+    return {"success": True, "message": "Vérification démarrée…"}
+
+
 # ── Bans routes ──────────────────────────────────────────────────────────
 
 @app.get("/api/bans")

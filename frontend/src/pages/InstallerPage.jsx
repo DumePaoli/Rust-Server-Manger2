@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import {
   Download, CheckCircle2, Circle, AlertCircle, RefreshCw,
-  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder,
+  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder, ShieldCheck,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -145,6 +145,21 @@ export default function InstallerPage() {
     setProgress(null);
     try {
       await axios.post(`${BASE}/api/installer/server/install`, {
+        steamcmd_path: steamcmdPath,
+        server_dir: serverDir,
+      });
+      startPolling(1500);
+    } catch {
+      setWorking(false);
+    }
+  };
+
+  const handleValidate = async () => {
+    setProgress(null);
+    setWorking(true);
+    goTo(3);
+    try {
+      await axios.post(`${BASE}/api/installer/server/validate`, {
         steamcmd_path: steamcmdPath,
         server_dir: serverDir,
       });
@@ -486,6 +501,14 @@ export default function InstallerPage() {
               Rendez-vous dans <strong>Server Settings</strong> pour personnaliser votre serveur, puis démarrez-le depuis le Dashboard.
             </p>
           )}
+          <button
+            className="btn-secondary w-full justify-center"
+            onClick={handleValidate}
+            disabled={!steamcmdPath || !serverDir}
+          >
+            <ShieldCheck size={14} />
+            Vérifier / Réparer les fichiers
+          </button>
         </div>
       </div>
     );
@@ -521,6 +544,27 @@ export default function InstallerPage() {
             Si vous avez déjà un serveur Rust installé, allez directement dans{" "}
             <strong className="text-gray-400">Server Settings → Advanced</strong> pour renseigner le chemin de l'exécutable.
           </p>
+        </div>
+      )}
+
+      {/* Maintenance card — always visible once steamcmd and serverDir are known */}
+      {steamcmdPath && serverDir && step !== 3 && (
+        <div className="card space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={14} className="text-rust-400" />
+            <span className="text-sm font-medium text-gray-300">Maintenance</span>
+          </div>
+          <p className="text-xs text-gray-500">
+            Lance <code className="text-gray-400">app_update 258550 validate</code> pour vérifier et réparer les fichiers du serveur (fichiers manquants, corrompus, etc.).
+          </p>
+          <button
+            className="btn-secondary text-sm w-full justify-center"
+            onClick={handleValidate}
+            disabled={working}
+          >
+            <ShieldCheck size={13} />
+            Vérifier / Réparer les fichiers serveur
+          </button>
         </div>
       )}
     </div>
