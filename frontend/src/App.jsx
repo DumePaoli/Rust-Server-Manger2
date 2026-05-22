@@ -13,6 +13,7 @@ import AppSettings from "./pages/AppSettings";
 import MessagesPage from "./pages/MessagesPage";
 import DiscordPage from "./pages/DiscordPage";
 import TimesPage from "./pages/TimesPage";
+import RconPage from "./pages/RconPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { SettingsProvider } from "./contexts/SettingsContext";
 
@@ -52,6 +53,7 @@ export default function App() {
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/times" element={<TimesPage />} />
           <Route path="/discord" element={<DiscordPage />} />
+          <Route path="/rcon" element={<RconPage />} />
         </Routes>
       </main>
 

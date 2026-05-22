@@ -20,6 +20,7 @@ from discord_notifier import notifier as discord, load_discord_config, save_disc
 import installer as installer_mod
 from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
 import plugins as plugins_mod
+from rcon import rcon_client
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -535,6 +536,52 @@ class InstallServerBody(BaseModel):
 async def install_server(body: InstallServerBody):
     installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
     return {"success": True, "message": "Installation démarrée…"}
+
+
+# ── RCON routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/rcon/status")
+async def rcon_status():
+    return rcon_client.get_status()
+
+
+class RconConnectBody(BaseModel):
+    host: str
+    port: int
+    password: str
+
+
+@app.post("/api/rcon/connect")
+async def rcon_connect(body: RconConnectBody):
+    ok, msg = await rcon_client.connect(body.host, body.port, body.password)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/rcon/disconnect")
+async def rcon_disconnect():
+    await rcon_client.disconnect()
+    return {"success": True}
+
+
+class RconCommandBody(BaseModel):
+    command: str
+
+
+@app.post("/api/rcon/command")
+async def rcon_command(body: RconCommandBody):
+    ok, response = await rcon_client.send_command(body.command)
+    return {"success": ok, "response": response}
+
+
+@app.get("/api/rcon/history")
+async def rcon_history():
+    return rcon_client.get_history()
+
+
+@app.delete("/api/rcon/history")
+async def rcon_clear_history():
+    rcon_client.clear_history()
+    return {"success": True}
 
 
 # ── Serve React build ──────────────────────────────────────────────────────

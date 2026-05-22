@@ -7,6 +7,7 @@ const FR = {
   "Server Settings": "Paramètres Serveur",
   "Messages": "Messages",
   "Times": "Programmation",
+  "RCON": "RCON",
   "Discord": "Discord",
   "App Settings": "Réglages",
   "Installer": "Installateur",

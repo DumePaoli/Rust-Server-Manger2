@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Settings, Terminal, Package, Users,
   Trash2, MessageSquare, Clock, Download, SlidersHorizontal,
-  ArrowUpCircle,
+  ArrowUpCircle, Radio,
 } from "lucide-react";
 import { useSettings } from "../contexts/SettingsContext";
 import { t } from "../i18n";
@@ -17,6 +17,7 @@ const NAV = [
   { divider: true },
   { to: "/messages", icon: MessageSquare, label: "Messages" },
   { to: "/times", icon: Clock, label: "Times" },
+  { to: "/rcon", icon: Radio, label: "RCON" },
   { to: "/discord", icon: MessageSquare, label: "Discord" },
   { divider: true },
   { to: "/app-settings", icon: SlidersHorizontal, label: "App Settings" },
