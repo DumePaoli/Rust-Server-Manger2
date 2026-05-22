@@ -134,6 +134,7 @@ export default function InstallerPage() {
 
   const handleUseSteamCMD = () => {
     if (!steamcmdPath) return;
+    setProgress(null);
     goTo(2);
   };
 
@@ -330,7 +331,7 @@ export default function InstallerPage() {
         <button
           className="btn-primary flex-1 justify-center"
           disabled={!serverDir.trim()}
-          onClick={() => goTo(3)}
+          onClick={() => { setProgress(null); goTo(3); }}
         >
           Installer
           <ChevronRight size={14} />
