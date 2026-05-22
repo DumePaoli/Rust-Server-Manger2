@@ -20,6 +20,9 @@ class ServerStatus:
     cpu_percent: float = 0.0
     memory_mb: float = 0.0
     started_at: Optional[str] = None
+    auto_restart: bool = False
+    restart_count: int = 0
+    last_crash_at: Optional[str] = None
 
 
 class ServerManager:
@@ -30,6 +33,14 @@ class ServerManager:
         self._log_callbacks: list[Callable[[str], None]] = []
         self._read_task: Optional[asyncio.Task] = None
         self.players = PlayerManager()
+        # Auto-restart state
+        self._config: Optional[dict] = None
+        self._stopping: bool = False
+        self._auto_restart: bool = False
+        self._auto_restart_delay: int = 10
+        self._auto_restart_max: int = 5
+        self._restart_count: int = 0
+        self._last_crash_at: Optional[str] = None
 
     def add_log_callback(self, cb: Callable[[str], None]) -> None:
         self._log_callbacks.append(cb)
@@ -59,8 +70,13 @@ class ServerManager:
         return self._process.poll() is None
 
     def get_status(self) -> ServerStatus:
+        base = dict(
+            auto_restart=self._auto_restart,
+            restart_count=self._restart_count,
+            last_crash_at=self._last_crash_at,
+        )
         if not self.is_running or self._process is None:
-            return ServerStatus(running=False)
+            return ServerStatus(running=False, **base)
         try:
             proc = psutil.Process(self._process.pid)
             mem = proc.memory_info().rss / (1024 * 1024)
@@ -73,9 +89,10 @@ class ServerManager:
                 cpu_percent=cpu,
                 memory_mb=round(mem, 1),
                 started_at=self._started_at.isoformat() if self._started_at else None,
+                **base,
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return ServerStatus(running=False)
+            return ServerStatus(running=False, **base)
 
     def get_console_log(self) -> list[str]:
         return self._console_log.copy()
@@ -83,6 +100,12 @@ class ServerManager:
     async def start(self, config: dict) -> tuple[bool, str]:
         if self.is_running:
             return False, "Server is already running."
+
+        self._config = config
+        self._stopping = False
+        self._auto_restart = bool(config.get("auto_restart", False))
+        self._auto_restart_delay = int(config.get("auto_restart_delay", 10))
+        self._auto_restart_max = int(config.get("auto_restart_max", 5))
 
         executable = config.get("server_executable", "")
         if not executable:
@@ -113,6 +136,7 @@ class ServerManager:
                 bufsize=1,
             )
             self._started_at = datetime.now()
+            self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
             self._read_task = asyncio.create_task(self._read_output())
             return True, f"Server started (PID {self._process.pid})"
@@ -177,6 +201,24 @@ class ServerManager:
             pass
         self._emit("Server process ended.")
 
+        # Auto-restart on unexpected exit
+        if not self._stopping and self._auto_restart and self._config:
+            if self._restart_count < self._auto_restart_max:
+                self._last_crash_at = datetime.now().isoformat()
+                self._restart_count += 1
+                self._emit(
+                    f"[Auto-restart] Crash détecté — redémarrage dans {self._auto_restart_delay}s "
+                    f"(tentative {self._restart_count}/{self._auto_restart_max})"
+                )
+                await asyncio.sleep(self._auto_restart_delay)
+                if not self._stopping:
+                    await self.start(self._config)
+            else:
+                self._emit(
+                    f"[Auto-restart] Nombre maximum de redémarrages atteint ({self._auto_restart_max}). "
+                    "Intervention manuelle requise."
+                )
+
     async def stop(self) -> tuple[bool, str]:
         if not self.is_running:
             return False, "Server is not running."
@@ -187,6 +229,7 @@ class ServerManager:
             self._emit("Demo server stopped.")
             return True, "Demo server stopped."
         try:
+            self._stopping = True
             self._process.terminate()
             self._emit("SIGTERM sent to server process...")
             await asyncio.sleep(5)

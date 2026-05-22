@@ -14,6 +14,7 @@ import MessagesPage from "./pages/MessagesPage";
 import DiscordPage from "./pages/DiscordPage";
 import TimesPage from "./pages/TimesPage";
 import RconPage from "./pages/RconPage";
+import BackupPage from "./pages/BackupPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { SettingsProvider } from "./contexts/SettingsContext";
 
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="/times" element={<TimesPage />} />
           <Route path="/discord" element={<DiscordPage />} />
           <Route path="/rcon" element={<RconPage />} />
+          <Route path="/backup" element={<BackupPage />} />
         </Routes>
       </main>
 

@@ -57,6 +57,10 @@ DEFAULT_CONFIG = {
     "auto_wipe_map": False,
     "auto_wipe_blueprints": False,
     "wipe_schedule": "monthly",
+    # Auto-restart
+    "auto_restart": False,
+    "auto_restart_delay": 10,
+    "auto_restart_max": 5,
 }
 
 

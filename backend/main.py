@@ -21,6 +21,8 @@ import installer as installer_mod
 from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
 import plugins as plugins_mod
 from rcon import rcon_client
+from monitor import monitor
+import backup as backup_mod
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -30,6 +32,7 @@ wipe_scheduler = WipeScheduler()
 wipe_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
 time_scheduler = TimeScheduler()
 time_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
+monitor.set_manager(manager)
 
 
 @asynccontextmanager
@@ -37,10 +40,14 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     wipe_scheduler.start()
     time_scheduler.start()
+    monitor.start()
+    backup_mod.backup_scheduler.start()
     yield
     scheduler.stop()
     wipe_scheduler.stop()
     time_scheduler.stop()
+    monitor.stop()
+    backup_mod.backup_scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -536,6 +543,60 @@ class InstallServerBody(BaseModel):
 async def install_server(body: InstallServerBody):
     installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
     return {"success": True, "message": "Installation démarrée…"}
+
+
+# ── Monitor routes ────────────────────────────────────────────────────────
+
+@app.get("/api/monitor/metrics")
+async def get_metrics(minutes: int = 15):
+    return monitor.get_metrics(minutes)
+
+
+# ── Backup routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/backup/config")
+async def get_backup_config():
+    return backup_mod.load_backup_config()
+
+
+@app.put("/api/backup/config")
+async def update_backup_config(body: ConfigUpdate):
+    backup_mod.save_backup_config(body.data)
+    return {"success": True}
+
+
+@app.get("/api/backup/list")
+async def list_backups():
+    cfg = backup_mod.load_backup_config()
+    return backup_mod.list_backups(cfg.get("backup_dir", ""))
+
+
+@app.get("/api/backup/progress")
+async def backup_progress():
+    return backup_mod.get_progress()
+
+
+@app.post("/api/backup/now")
+async def backup_now():
+    cfg = backup_mod.load_backup_config()
+    data_path = load_config().get("server_data_path", "").strip()
+    if not data_path:
+        return {"success": False, "message": "server_data_path non configuré"}
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(
+        None, backup_mod.do_backup, data_path, cfg["backup_dir"], cfg["keep_last"]
+    )
+    if ok:
+        cfg["last_backup"] = __import__("time").time()
+        backup_mod.save_backup_config(cfg)
+    return {"success": ok, "message": msg}
+
+
+@app.delete("/api/backup/{filename}")
+async def delete_backup(filename: str):
+    cfg = backup_mod.load_backup_config()
+    ok, msg = backup_mod.delete_backup(cfg.get("backup_dir", ""), filename)
+    return {"success": ok, "message": msg}
 
 
 # ── RCON routes ──────────────────────────────────────────────────────────

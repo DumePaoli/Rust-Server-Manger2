@@ -438,6 +438,24 @@ export default function ServerSettings() {
                 <ToggleRow label="Auto Wipe Blueprints" desc="Wipe blueprint data on next restart"
                   checked={!!config.auto_wipe_blueprints} onChange={v => set("auto_wipe_blueprints", v)} />
               </div>
+              <div className="border-t border-surface-600 pt-4 space-y-3">
+                <ToggleRow label="Redémarrage automatique" desc="Redémarre le serveur automatiquement s'il crashe"
+                  checked={!!config.auto_restart} onChange={v => set("auto_restart", v)} />
+                {config.auto_restart && (
+                  <div className="grid grid-cols-2 gap-4 pt-1 pl-4">
+                    <Field label="Délai avant redémarrage (s)">
+                      <input className="input text-sm" type="number" min="5" max="300"
+                        value={config.auto_restart_delay ?? 10}
+                        onChange={e => set("auto_restart_delay", parseInt(e.target.value) || 10)} />
+                    </Field>
+                    <Field label="Tentatives maximum">
+                      <input className="input text-sm" type="number" min="1" max="20"
+                        value={config.auto_restart_max ?? 5}
+                        onChange={e => set("auto_restart_max", parseInt(e.target.value) || 5)} />
+                    </Field>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Launch command preview */}

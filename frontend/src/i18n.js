@@ -8,6 +8,7 @@ const FR = {
   "Messages": "Messages",
   "Times": "Programmation",
   "RCON": "RCON",
+  "Sauvegardes": "Sauvegardes",
   "Discord": "Discord",
   "App Settings": "Réglages",
   "Installer": "Installateur",

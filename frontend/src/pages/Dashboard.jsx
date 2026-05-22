@@ -119,21 +119,26 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  // Sparkline history
-  const [cpuHistory, setCpuHistory] = useState([]);
-  const [ramHistory, setRamHistory] = useState([]);
+  const [cpuHistory, setCpuHistory]         = useState([]);
+  const [ramHistory, setRamHistory]         = useState([]);
+  const [playersHistory, setPlayersHistory] = useState([]);
 
   const wipeRef = useRef(null);
+
+  const fetchMetrics = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BASE}/api/monitor/metrics`);
+      if (data.cpu_series?.length)     setCpuHistory(data.cpu_series.slice(-MAX_POINTS));
+      if (data.ram_series?.length)     setRamHistory(data.ram_series.slice(-MAX_POINTS));
+      if (data.players_series?.length) setPlayersHistory(data.players_series.slice(-MAX_POINTS));
+    } catch {}
+  }, []);
 
   // Fetch status every 3s
   const fetchStatus = useCallback(async () => {
     try {
       const { data } = await axios.get(`${BASE}/api/status`);
       setStatus(data);
-      if (data.running) {
-        setCpuHistory(h => [...h.slice(-(MAX_POINTS - 1)), data.cpu_percent]);
-        setRamHistory(h => [...h.slice(-(MAX_POINTS - 1)), data.memory_mb]);
-      }
     } catch { }
   }, []);
 
@@ -164,15 +169,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     getConfig().then(setConfig).catch(() => { });
-    fetchStatus(); fetchPlayers(); fetchWipe(); fetchConsole();
+    fetchStatus(); fetchPlayers(); fetchWipe(); fetchConsole(); fetchMetrics();
     const intervals = [
       setInterval(fetchStatus, 3000),
       setInterval(fetchPlayers, 10000),
       setInterval(fetchWipe, 30000),
       setInterval(fetchConsole, 5000),
+      setInterval(fetchMetrics, 10000),
     ];
     return () => intervals.forEach(clearInterval);
-  }, [fetchStatus, fetchPlayers, fetchWipe, fetchConsole]);
+  }, [fetchStatus, fetchPlayers, fetchWipe, fetchConsole, fetchMetrics]);
 
   // Local wipe countdown tick
   useEffect(() => {
@@ -250,6 +256,8 @@ export default function Dashboard() {
           value={status.running ? `${players.length}` : "—"}
           sub={status.running ? `sur ${maxPlayers}` : "Serveur arrêté"}
           color="text-rust-400"
+          chart={playersHistory}
+          chartMax={maxPlayers}
         />
         <StatCard
           icon={Clock} label="Uptime"
