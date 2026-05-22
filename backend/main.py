@@ -967,6 +967,21 @@ async def update_plugin(name: str):
     return {"success": ok, "message": msg}
 
 
+# ── Folder browser (desktop only) ─────────────────────────────────────────
+
+@app.get("/api/browse-folder")
+async def browse_folder():
+    try:
+        import webview
+        if webview.windows:
+            result = webview.windows[0].create_file_dialog(webview.FOLDER_DIALOG)
+            if result:
+                return {"path": result[0]}
+    except Exception:
+        pass
+    return {"path": None}
+
+
 # ── Serve React build ──────────────────────────────────────────────────────
 def _frontend_dist() -> Path:
     import sys

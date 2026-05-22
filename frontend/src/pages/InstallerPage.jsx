@@ -2,10 +2,17 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import {
   Download, CheckCircle2, Circle, AlertCircle, RefreshCw,
-  Terminal, Wrench, FolderOpen, ChevronRight, Check,
+  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+async function pickFolder(setter) {
+  try {
+    const { data } = await axios.get(`${BASE}/api/browse-folder`);
+    if (data.path) setter(data.path);
+  } catch { /* non-desktop: ignore */ }
+}
 
 const STEPS = [
   { id: 1, title: "SteamCMD", desc: "Localiser ou télécharger SteamCMD" },
@@ -215,6 +222,7 @@ export default function InstallerPage() {
           value={steamcmdPath}
           onChange={e => setSteamcmdPath(e.target.value)}
         />
+        <p className="text-xs text-gray-600 mt-1">Saisissez le chemin complet vers steamcmd.exe</p>
       </div>
 
       <div className="flex items-center gap-2 text-gray-500 text-xs">
@@ -226,11 +234,21 @@ export default function InstallerPage() {
       {/* Auto-download */}
       <div className="space-y-2">
         <label className="label">Dossier d'installation SteamCMD</label>
-        <input
-          className="input font-mono text-xs"
-          value={steamcmdDir}
-          onChange={e => setSteamcmdDir(e.target.value)}
-        />
+        <div className="flex gap-2">
+          <input
+            className="input font-mono text-xs flex-1"
+            value={steamcmdDir}
+            onChange={e => setSteamcmdDir(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => pickFolder(setSteamcmdDir)}
+            className="btn-secondary px-3 shrink-0"
+            title="Parcourir"
+          >
+            <Folder size={14} />
+          </button>
+        </div>
         <button
           className="btn-secondary text-sm w-full justify-center"
           onClick={handleDownloadSteamCMD}
@@ -284,12 +302,22 @@ export default function InstallerPage() {
 
       <div>
         <label className="label">Répertoire du serveur Rust</label>
-        <input
-          className="input font-mono text-sm"
-          placeholder={status?.platform === "win32" ? "C:\\RustServer" : "/opt/rust_server"}
-          value={serverDir}
-          onChange={e => setServerDir(e.target.value)}
-        />
+        <div className="flex gap-2">
+          <input
+            className="input font-mono text-sm flex-1"
+            placeholder={status?.platform === "win32" ? "C:\\RustServer" : "/opt/rust_server"}
+            value={serverDir}
+            onChange={e => setServerDir(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={() => pickFolder(setServerDir)}
+            className="btn-secondary px-3 shrink-0"
+            title="Parcourir"
+          >
+            <Folder size={14} />
+          </button>
+        </div>
         <p className="text-xs text-gray-600 mt-1.5">
           Le dossier sera créé s'il n'existe pas déjà.
         </p>
