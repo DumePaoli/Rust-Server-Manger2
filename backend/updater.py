@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import ssl
 import urllib.request
 import urllib.error
 import subprocess
@@ -51,7 +52,10 @@ class UpdateChecker:
                 url,
                 headers={"User-Agent": "RustServerManager-Updater/1.0"},
             )
-            with urllib.request.urlopen(req, timeout=6) as resp:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
                 data = json.loads(resp.read().decode())
 
             latest_tag = data.get("tag_name", "").lstrip("v")
@@ -136,7 +140,24 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     pid = os.getpid()
 
     try:
-        urllib.request.urlretrieve(download_url, str(tmp_exe), reporthook=_progress.hook)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        def _retrieve(url, dest, hook):
+            with opener.open(url) as src:
+                total = int(src.headers.get("Content-Length", 0))
+                block = 8192
+                count = 0
+                with open(dest, "wb") as f:
+                    while True:
+                        chunk = src.read(block)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        count += 1
+                        hook(count, block, total)
+        _retrieve(download_url, str(tmp_exe), _progress.hook)
         _progress.percent = 100
     except Exception as exc:
         _progress.error = str(exc)
