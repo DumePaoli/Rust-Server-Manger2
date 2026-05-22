@@ -120,8 +120,7 @@ class ServerManager:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
+                bufsize=0,
             )
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
@@ -146,7 +145,6 @@ class ServerManager:
             f"+rcon.password {config.get('rcon_password', 'changeme')}",
             f"+rcon.web 1",
             "-nographics",
-            "-logFile server_output.log",
         ]
         custom_map = config.get("custom_map_url", "")
         if custom_map:
@@ -179,12 +177,25 @@ class ServerManager:
         if self._process is None or not hasattr(self._process, "stdout"):
             return
         loop = asyncio.get_event_loop()
-        try:
-            while self.is_running:
-                line = await loop.run_in_executor(None, self._process.stdout.readline)
-                if not line:
+
+        def _read_chunks():
+            buf = b""
+            while True:
+                chunk = self._process.stdout.read(512)
+                if not chunk:
                     break
-                self._emit(line.rstrip())
+                buf += chunk
+                parts = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
+                buf = parts[-1]
+                for part in parts[:-1]:
+                    line = part.decode("utf-8", errors="replace").strip()
+                    if line:
+                        self._emit(line)
+            if buf.strip():
+                self._emit(buf.decode("utf-8", errors="replace").strip())
+
+        try:
+            await loop.run_in_executor(None, _read_chunks)
         except Exception:
             pass
         self._emit("Server process ended.")
