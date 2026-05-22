@@ -8,6 +8,10 @@
 - Code first, explanation after (only if needed)
 - One sentence per update during work, not running commentary
 
+## Caveman mode
+Invoke `/caveman` for ~75% token reduction. Levels: `lite` / `full` (default) / `ultra` / `wenyan-*`.
+Disable: "stop caveman" or "normal mode". Skill: `.claude/commands/caveman.md`.
+
 ## Project: Rust Server Manager
 
 Web-based management panel for Rust dedicated servers.
