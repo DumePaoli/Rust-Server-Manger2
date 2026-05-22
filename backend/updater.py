@@ -171,23 +171,36 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     # external TerminateProcess() call that bypasses all of that.
     mei_path = getattr(sys, "_MEIPASS", "")
     ps_path = Path(str(current_exe) + "_update.ps1")
+    log_path = Path(str(current_exe) + "_update.log")
     ps = (
+        f'$log = "{log_path}"\n'
+        f'"[$(Get-Date)] Update started pid={pid}" | Out-File $log\n'
         "Start-Sleep -Seconds 1\n"
-        f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
-        "Start-Sleep -Seconds 2\n"
+        f'Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n'
+        f'"[$(Get-Date)] Process stopped" | Out-File $log -Append\n'
+        "Start-Sleep -Seconds 3\n"
         + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
-        + "$retries = 20\n"
+        + "$retries = 30\n"
+        "$replaced = $false\n"
         "while ($retries -gt 0) {\n"
         "  try {\n"
-        f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
+        f'    Copy-Item -Force "{tmp_exe}" "{current_exe}"\n'
+        f'    Remove-Item -Force "{tmp_exe}" -ErrorAction SilentlyContinue\n'
+        "    $replaced = $true\n"
+        f'    "[$(Get-Date)] Replaced OK" | Out-File $log -Append\n'
         "    break\n"
         "  } catch {\n"
+        f'    "[$(Get-Date)] Retry $retries : $_" | Out-File $log -Append\n'
         "    Start-Sleep -Seconds 1\n"
         "    $retries--\n"
         "  }\n"
         "}\n"
-        f'Start-Process "{current_exe}"\n'
-        "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
+        "if ($replaced) {\n"
+        f'  Start-Process "{current_exe}"\n'
+        "} else {\n"
+        f'  "[$(Get-Date)] FAILED after all retries" | Out-File $log -Append\n'
+        "}\n"
+        "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
     )
 
     try:
