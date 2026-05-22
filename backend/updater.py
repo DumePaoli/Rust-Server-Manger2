@@ -202,9 +202,11 @@ WScript.Sleep 4000
 
 ' Delete old _MEIPASS extraction folder if present
 ''' + (f'''
+On Error Resume Next
 If oFS.FolderExists("{esc(mei_path)}") Then
     oFS.DeleteFolder "{esc(mei_path)}", True
 End If
+On Error GoTo 0
 ''' if mei_path else '') + f'''
 ' Copy new exe over old exe, retry up to 30 times
 Dim retries, replaced
