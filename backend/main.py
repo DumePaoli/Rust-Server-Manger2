@@ -19,6 +19,7 @@ from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wi
 from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
 from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
+import plugins as plugins_mod
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
@@ -379,6 +380,43 @@ async def apply_update_route():
     import asyncio
     asyncio.get_event_loop().run_in_executor(None, apply_update, url)
     return {"success": True, "message": "Téléchargement en cours…"}
+
+
+# ── Plugins routes ───────────────────────────────────────────────────────
+
+@app.get("/api/plugins/installed")
+async def get_installed_plugins():
+    return plugins_mod.list_installed(load_config())
+
+
+@app.get("/api/plugins/search")
+async def search_plugins(q: str = "", page: int = 1):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, plugins_mod.search_umod, q, page)
+
+
+class InstallPluginBody(BaseModel):
+    download_url: str
+    name: str
+
+
+@app.post("/api/plugins/install")
+async def install_plugin(body: InstallPluginBody):
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(None, plugins_mod.install_plugin, load_config(), body.download_url, body.name)
+    return {"success": ok, "message": msg}
+
+
+@app.delete("/api/plugins/{name}")
+async def remove_plugin(name: str):
+    ok, msg = plugins_mod.remove_plugin(load_config(), name)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/plugins/{name}/reload")
+async def reload_plugin(name: str):
+    await manager.send_command(f"oxide.reload {name}")
+    return {"success": True}
 
 
 # ── Times routes ─────────────────────────────────────────────────────────
