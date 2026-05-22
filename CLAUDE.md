@@ -16,6 +16,10 @@ Disable: "stop caveman" or "normal mode".
 
 Auto-clarity for: security warnings, irreversible actions, ambiguous multi-step sequences. Resume caveman after.
 
+## Caveman mode
+Invoke `/caveman` for ~75% token reduction. Levels: `lite` / `full` (default) / `ultra` / `wenyan-*`.
+Disable: "stop caveman" or "normal mode". Skill: `.claude/commands/caveman.md`.
+
 ## Project: Rust Server Manager
 
 Web-based management panel for Rust dedicated servers.
