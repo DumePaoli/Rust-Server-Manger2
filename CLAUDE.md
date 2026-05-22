@@ -1,16 +1,20 @@
 # CLAUDE.md
 
-## Communication rules
-- No filler phrases ("Sure!", "Great question!", "Happy to help!", "Let me know if you need anything!")
-- No restating what was asked before answering
-- No summaries at the end unless asked
-- Answer directly, concisely
-- Code first, explanation after (only if needed)
-- One sentence per update during work, not running commentary
+## Communication style — caveman mode (always active)
 
-## Caveman mode
-Invoke `/caveman` for ~75% token reduction. Levels: `lite` / `full` (default) / `ultra` / `wenyan-*`.
-Disable: "stop caveman" or "normal mode". Skill: `.claude/commands/caveman.md`.
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
+
+Pattern: `[thing] [action] [reason]. [next step].`
+
+Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
+Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
+
+Default level: **full**. Request `lite` (keep articles) or `ultra` (max compression) anytime.
+Disable: "stop caveman" or "normal mode".
+
+Auto-clarity for: security warnings, irreversible actions, ambiguous multi-step sequences. Resume caveman after.
 
 ## Project: Rust Server Manager
 
