@@ -158,27 +158,36 @@ def start_download_steamcmd(install_dir: str) -> None:
     t.start()
 
 
-def _run_steamcmd(steamcmd_path: str, args: list) -> tuple[int, None]:
+def _run_steamcmd(steamcmd_path: str, args: list) -> int:
     proc = subprocess.Popen(
         [steamcmd_path] + args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-        encoding="utf-8",
-        errors="replace",
+        bufsize=0,  # unbuffered binary
     )
-    for line in proc.stdout:
-        line = line.rstrip()
-        if not line:
-            continue
-        _progress.log(line)
-        if "progress:" in line.lower():
-            try:
-                pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
-                _progress.percent = min(99, int(float(pct_str)))
-            except Exception:
-                pass
+    buf = b""
+    while True:
+        chunk = proc.stdout.read(256)
+        if not chunk:
+            break
+        buf += chunk
+        # Split on \r or \n — SteamCMD uses \r for progress lines
+        parts = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
+        buf = parts[-1]  # incomplete line, keep for next iteration
+        for part in parts[:-1]:
+            line = part.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            _progress.log(line)
+            if "progress:" in line.lower():
+                try:
+                    pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
+                    _progress.percent = min(99, int(float(pct_str)))
+                except Exception:
+                    pass
+    # flush remaining buffer
+    if buf.strip():
+        _progress.log(buf.decode("utf-8", errors="replace").strip())
     proc.wait()
     return proc.returncode
 
