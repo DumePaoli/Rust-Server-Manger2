@@ -15,29 +15,52 @@ def _config_path() -> Path:
 CONFIG_PATH = _config_path()
 
 DEFAULT_CONFIG = {
+    # General
     "server_name": "My Rust Server",
+    "server_description": "A Rust server managed by RustManager",
+    "server_url": "",
+    "server_logo_url": "",
+    "server_app_logo_url": "",
+    "server_tags": [],
+    "admin_steamid": "",
+    # Network
     "server_ip": "0.0.0.0",
     "server_port": 28015,
     "rcon_port": 28016,
     "rcon_password": "changeme",
+    "query_port": 28017,
+    "app_port": 28082,
+    # Players
     "max_players": 100,
+    # Map
+    "level": "Procedural Map",
     "map_size": 3500,
     "map_seed": 12345,
-    "server_description": "A Rust server managed by RustManager",
-    "server_url": "",
-    "server_logo_url": "",
+    "custom_map_url": "",
+    # Server
     "server_executable": "",
     "server_identity": "rust_server",
-    "level": "Procedural Map",
     "save_interval": 600,
+    # ConVars
+    "gather_rate": 1.0,
+    "craft_rate": 1.0,
     "decay_scale": 1.0,
     "radiation": True,
     "pve": False,
+    "hardcore": False,
+    # Modding
     "oxide_enabled": False,
+    # Wipe
+    "server_data_path": "",
+    # Advanced
     "auto_update": True,
     "auto_wipe_map": False,
     "auto_wipe_blueprints": False,
     "wipe_schedule": "monthly",
+    # Auto-restart
+    "auto_restart": False,
+    "auto_restart_delay": 10,
+    "auto_restart_max": 5,
 }
 
 
