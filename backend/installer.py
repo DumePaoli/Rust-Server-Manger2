@@ -158,6 +158,31 @@ def start_download_steamcmd(install_dir: str) -> None:
     t.start()
 
 
+def _run_steamcmd(steamcmd_path: str, args: list) -> tuple[int, None]:
+    proc = subprocess.Popen(
+        [steamcmd_path] + args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+        errors="replace",
+    )
+    for line in proc.stdout:
+        line = line.rstrip()
+        if not line:
+            continue
+        _progress.log(line)
+        if "progress:" in line.lower():
+            try:
+                pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
+                _progress.percent = min(99, int(float(pct_str)))
+            except Exception:
+                pass
+    proc.wait()
+    return proc.returncode
+
+
 def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     global _progress
     _progress = InstallProgress()
@@ -168,51 +193,30 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     _progress.log(f"SteamCMD : {steamcmd_path}")
     _progress.log(f"Dossier serveur : {server_dir}")
     _progress.log(f"App ID : {RUST_APP_ID} (Rust Dedicated Server)")
-    _progress.log("Démarrage de l'installation...")
     _progress.log("─" * 40)
 
-    cmd = [
-        steamcmd_path,
-        "+force_install_dir", server_dir,
-        "+login", "anonymous",
-        "+app_update", RUST_APP_ID, "validate",
-        "+quit",
-    ]
-
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            encoding="utf-8",
-            errors="replace",
-        )
-
-        for line in proc.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-            _progress.log(line)
-            # Parse SteamCMD progress lines like "Update state (0x61) downloading, progress: 45.32 (1234 / 2720)"
-            if "progress:" in line.lower():
-                try:
-                    pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
-                    pct = float(pct_str)
-                    _progress.percent = min(99, int(pct))
-                except Exception:
-                    pass
-
-        proc.wait()
+        # Pass 1: let SteamCMD self-update before the actual install
+        _progress.log("Étape 1/2 — Mise à jour de SteamCMD...")
+        _run_steamcmd(steamcmd_path, ["+quit"])
         _progress.log("─" * 40)
 
-        if proc.returncode == 0:
-            if sys.platform == "win32":
-                exe = os.path.join(server_dir, "RustDedicated.exe")
-            else:
-                exe = os.path.join(server_dir, "RustDedicated")
+        # Pass 2: install Rust server
+        _progress.log("Étape 2/2 — Téléchargement du serveur Rust...")
+        _progress.log("(peut prendre 20-40 minutes)")
+        _progress.log("─" * 40)
 
+        ret = _run_steamcmd(steamcmd_path, [
+            "+force_install_dir", server_dir,
+            "+login", "anonymous",
+            "+app_update", RUST_APP_ID, "validate",
+            "+quit",
+        ])
+
+        _progress.log("─" * 40)
+
+        if ret == 0:
+            exe = os.path.join(server_dir, "RustDedicated.exe" if sys.platform == "win32" else "RustDedicated")
             if os.path.isfile(exe):
                 _progress.percent = 100
                 _progress.status = "done"
@@ -224,7 +228,7 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
                 _progress.log(_progress.error)
         else:
             _progress.status = "error"
-            _progress.error = f"SteamCMD a retourné le code {proc.returncode}"
+            _progress.error = f"SteamCMD a retourné le code {ret} — vérifiez votre connexion et que les ports UDP 27015-27030 sont ouverts."
             _progress.log(_progress.error)
 
     except Exception as exc:
