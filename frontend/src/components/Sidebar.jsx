@@ -4,6 +4,8 @@ import {
   Trash2, MessageSquare, Clock, Download, SlidersHorizontal,
   ArrowUpCircle,
 } from "lucide-react";
+import { useSettings } from "../contexts/SettingsContext";
+import { t } from "../i18n";
 
 const NAV = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
@@ -22,6 +24,7 @@ const NAV = [
 ];
 
 export default function Sidebar({ updateInfo, onUpdateClick }) {
+  const { lang } = useSettings();
   const hasUpdate = updateInfo?.available;
 
   return (
@@ -79,7 +82,7 @@ export default function Sidebar({ updateInfo, onUpdateClick }) {
               }
             >
               <item.icon size={16} className="shrink-0" />
-              <span className="flex-1">{item.label}</span>
+              <span className="flex-1">{t(item.label, lang)}</span>
               {item.soon && (
                 <span className="text-[10px] font-medium bg-surface-500 text-gray-500 px-1.5 py-0.5 rounded">
                   Soon

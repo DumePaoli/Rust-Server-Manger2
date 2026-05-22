@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --accent-50:  255 247 237;
+  --accent-100: 255 237 213;
+  --accent-200: 254 215 170;
+  --accent-300: 253 186 116;
+  --accent-400: 251 146 60;
+  --accent-500: 249 115 22;
+  --accent-600: 234 88 12;
+  --accent-700: 194 65 12;
+  --accent-800: 154 52 18;
+  --accent-900: 124 45 18;
+}
+
 @layer base {
   * {
     scrollbar-width: thin;
@@ -19,7 +32,7 @@
     border-radius: 3px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background-color: #f04f00;
+    background-color: rgb(var(--accent-600));
   }
   body {
     margin: 0;

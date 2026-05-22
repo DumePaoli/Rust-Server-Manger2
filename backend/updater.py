@@ -142,8 +142,12 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # PowerShell script: wait for the process to die, then swap the exe and restart.
-    # Python kills itself below via ctypes TerminateProcess — the PS1 only needs to wait.
+    # sys._MEIPASS is the temp extraction dir (e.g. _MEI289042).
+    # After TerminateProcess the dir stays on disk. If the new exe computes the
+    # same folder hash it would try to reuse stale/locked files → DLL load failure.
+    # We tell PowerShell to delete it before launching the new exe.
+    mei_path = getattr(sys, "_MEIPASS", "")
+
     ps_path = Path(str(current_exe) + "_update.ps1")
     ps = (
         "Start-Sleep -Seconds 4\n"
@@ -158,7 +162,9 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         "    }\n"
         "  } else { break }\n"
         "}\n"
-        f'Start-Process "{current_exe}"\n'
+        # Delete the old PyInstaller extraction dir so the new exe always extracts fresh
+        + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
+        + f'Start-Process "{current_exe}"\n'
         "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
     )
 

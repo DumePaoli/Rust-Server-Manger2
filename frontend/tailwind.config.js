@@ -5,16 +5,16 @@ export default {
     extend: {
       colors: {
         rust: {
-          50:  "#fff3ed",
-          100: "#ffe4cc",
-          200: "#ffc594",
-          300: "#ff9d5c",
-          400: "#ff7024",
-          500: "#f04f00",
-          600: "#cc3a00",
-          700: "#a82b00",
-          800: "#862200",
-          900: "#6e1c00",
+          50:  "rgb(var(--accent-50)  / <alpha-value>)",
+          100: "rgb(var(--accent-100) / <alpha-value>)",
+          200: "rgb(var(--accent-200) / <alpha-value>)",
+          300: "rgb(var(--accent-300) / <alpha-value>)",
+          400: "rgb(var(--accent-400) / <alpha-value>)",
+          500: "rgb(var(--accent-500) / <alpha-value>)",
+          600: "rgb(var(--accent-600) / <alpha-value>)",
+          700: "rgb(var(--accent-700) / <alpha-value>)",
+          800: "rgb(var(--accent-800) / <alpha-value>)",
+          900: "rgb(var(--accent-900) / <alpha-value>)",
         },
         surface: {
           900: "#0d0d0f",
@@ -33,4 +33,3 @@ export default {
   },
   plugins: [],
 };
-

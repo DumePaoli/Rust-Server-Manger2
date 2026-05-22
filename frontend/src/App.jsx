@@ -14,6 +14,7 @@ import MessagesPage from "./pages/MessagesPage";
 import DiscordPage from "./pages/DiscordPage";
 import TimesPage from "./pages/TimesPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { SettingsProvider } from "./contexts/SettingsContext";
 
 function ComingSoon({ title }) {
   return (
@@ -32,6 +33,7 @@ export default function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   return (
+    <SettingsProvider>
     <div className="flex w-full min-h-screen bg-surface-900">
       <Sidebar
         updateInfo={updateInfo}
@@ -61,5 +63,6 @@ export default function App() {
         />
       )}
     </div>
+    </SettingsProvider>
   );
 }
