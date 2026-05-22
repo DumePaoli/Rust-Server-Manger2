@@ -11,29 +11,121 @@ from typing import Optional
 from pathlib import Path
 
 from config import load_config, save_config
-from server_manager import ServerManager
+from server_manager import ServerManager, ServerStatus
+from players import PlayerManager
 from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
 from messages import MessageScheduler, load_messages, save_messages
 from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
 from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
+from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
+import plugins as plugins_mod
+from rcon import rcon_client
+from monitor import monitor
+import backup as backup_mod
+import bans as bans_mod
+from chat_log import chat_log
+import oxide_perms as oxide_mod
+from multi_server import registry
 
-manager = ServerManager()
+
+class _ManagerProxy:
+    """Delegates all calls to the currently active server's manager."""
+
+    def add_log_callback(self, cb):
+        registry.add_log_callback(cb)
+
+    @property
+    def is_running(self):
+        m = registry.get_active_manager()
+        return m.is_running if m else False
+
+    @property
+    def players(self):
+        m = registry.get_active_manager()
+        return m.players if m else PlayerManager()
+
+    async def start(self, config=None):
+        m = registry.get_active_manager()
+        if not m:
+            return False, "Aucun serveur actif"
+        if config is None:
+            active = registry.get_active()
+            config = active.config if active else {}
+        return await m.start(config)
+
+    async def stop(self):
+        m = registry.get_active_manager()
+        return await m.stop() if m else (False, "Aucun serveur actif")
+
+    async def restart(self, config=None):
+        m = registry.get_active_manager()
+        if not m:
+            return False, "Aucun serveur actif"
+        if config is None:
+            active = registry.get_active()
+            config = active.config if active else {}
+        return await m.restart(config)
+
+    async def send_command(self, cmd):
+        m = registry.get_active_manager()
+        if m:
+            await m.send_command(cmd)
+
+    def get_status(self):
+        m = registry.get_active_manager()
+        return m.get_status() if m else ServerStatus()
+
+    def get_console_log(self):
+        m = registry.get_active_manager()
+        return m.get_console_log() if m else []
+
+
+manager = _ManagerProxy()
+manager.add_log_callback(chat_log.on_log_line)
+
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
 scheduler = MessageScheduler()
 scheduler.set_send_fn(manager.send_command)
 wipe_scheduler = WipeScheduler()
 wipe_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
+time_scheduler = TimeScheduler()
+time_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
+monitor.set_manager(registry.get_active_manager())
+registry.set_on_active_change(monitor.set_manager)
+
+
+def _on_player_connect(name: str, steamid: str):
+    try:
+        asyncio.get_event_loop().run_in_executor(None, lambda: discord.send_event("player_join", name=name))
+    except Exception:
+        pass
+
+
+def _on_player_disconnect(name: str, steamid: str):
+    try:
+        asyncio.get_event_loop().run_in_executor(None, lambda: discord.send_event("player_leave", name=name))
+    except Exception:
+        pass
+
+
+registry.set_player_callbacks(_on_player_connect, _on_player_disconnect)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler.start()
     wipe_scheduler.start()
+    time_scheduler.start()
+    monitor.start()
+    backup_mod.backup_scheduler.start()
     yield
     scheduler.stop()
     wipe_scheduler.stop()
+    time_scheduler.stop()
+    monitor.stop()
+    backup_mod.backup_scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -77,7 +169,8 @@ async def get_status():
 
 @app.post("/api/start")
 async def start_server():
-    config = load_config()
+    active = registry.get_active()
+    config = active.config if active else load_config()
     ok, msg = await manager.start(config)
     if ok:
         asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_start")
@@ -94,14 +187,16 @@ async def stop_server():
 
 @app.post("/api/restart")
 async def restart_server():
-    config = load_config()
+    active = registry.get_active()
+    config = active.config if active else load_config()
     ok, msg = await manager.restart(config)
     return {"success": ok, "message": msg}
 
 
 @app.get("/api/config")
 async def get_config():
-    return load_config()
+    active = registry.get_active()
+    return active.config if active else load_config()
 
 
 class ConfigUpdate(BaseModel):
@@ -110,7 +205,11 @@ class ConfigUpdate(BaseModel):
 
 @app.put("/api/config")
 async def update_config(body: ConfigUpdate):
-    save_config(body.data)
+    active = registry.get_active()
+    if active:
+        registry.save_config(active.id, body.data)
+    else:
+        save_config(body.data)
     return {"success": True, "message": "Configuration saved."}
 
 
@@ -376,6 +475,128 @@ async def apply_update_route():
     return {"success": True, "message": "Téléchargement en cours…"}
 
 
+# ── Plugins routes ───────────────────────────────────────────────────────
+
+@app.get("/api/plugins/installed")
+async def get_installed_plugins():
+    return plugins_mod.list_installed(load_config())
+
+
+@app.get("/api/plugins/search")
+async def search_plugins(q: str = "", page: int = 1):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, plugins_mod.search_umod, q, page)
+
+
+class InstallPluginBody(BaseModel):
+    download_url: str
+    name: str
+
+
+@app.post("/api/plugins/install")
+async def install_plugin(body: InstallPluginBody):
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(None, plugins_mod.install_plugin, load_config(), body.download_url, body.name)
+    return {"success": ok, "message": msg}
+
+
+@app.delete("/api/plugins/{name}")
+async def remove_plugin(name: str):
+    ok, msg = plugins_mod.remove_plugin(load_config(), name)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/plugins/{name}/reload")
+async def reload_plugin(name: str):
+    await manager.send_command(f"oxide.reload {name}")
+    return {"success": True}
+
+
+# ── Times routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/times")
+async def get_times():
+    return load_tasks()
+
+
+class TaskBody(BaseModel):
+    name: str
+    type: str = "restart"
+    command: str = ""
+    schedule_type: str = "daily"
+    time: str = "04:00"
+    day: str = "monday"
+    interval_hours: int = 6
+    warn_minutes: list = [15, 5, 1]
+    enabled: bool = True
+
+
+@app.post("/api/times")
+async def create_task(body: TaskBody):
+    import uuid as _uuid
+    tasks = load_tasks()
+    task = {
+        "id": str(_uuid.uuid4()),
+        "name": body.name,
+        "type": body.type,
+        "command": body.command,
+        "schedule_type": body.schedule_type,
+        "time": body.time,
+        "day": body.day,
+        "interval_hours": body.interval_hours,
+        "warn_minutes": body.warn_minutes,
+        "enabled": body.enabled,
+        "last_run": None,
+        "next_run": None,
+    }
+    task["next_run"] = compute_next_run(task)
+    tasks.append(task)
+    save_tasks(tasks)
+    return task
+
+
+@app.put("/api/times/{tid}")
+async def update_task(tid: str, body: TaskBody):
+    tasks = load_tasks()
+    for t in tasks:
+        if t["id"] == tid:
+            t.update({
+                "name": body.name,
+                "type": body.type,
+                "command": body.command,
+                "schedule_type": body.schedule_type,
+                "time": body.time,
+                "day": body.day,
+                "interval_hours": body.interval_hours,
+                "warn_minutes": body.warn_minutes,
+                "enabled": body.enabled,
+            })
+            t["next_run"] = compute_next_run(t)
+            save_tasks(tasks)
+            return t
+    return {"error": "Not found"}
+
+
+@app.delete("/api/times/{tid}")
+async def delete_task(tid: str):
+    tasks = [t for t in load_tasks() if t["id"] != tid]
+    save_tasks(tasks)
+    return {"success": True}
+
+
+@app.post("/api/times/{tid}/toggle")
+async def toggle_task(tid: str):
+    tasks = load_tasks()
+    for t in tasks:
+        if t["id"] == tid:
+            t["enabled"] = not t.get("enabled", True)
+            if t["enabled"]:
+                t["next_run"] = compute_next_run(t)
+            save_tasks(tasks)
+            return t
+    return {"error": "Not found"}
+
+
 # ── Installer routes ──────────────────────────────────────────────────────
 
 @app.get("/api/installer/status")
@@ -407,6 +628,267 @@ class InstallServerBody(BaseModel):
 async def install_server(body: InstallServerBody):
     installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
     return {"success": True, "message": "Installation démarrée…"}
+
+
+# ── Bans routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/bans")
+async def get_bans():
+    return bans_mod.list_bans(load_config())
+
+
+class BanBody(BaseModel):
+    steamid: str
+    name: str = ""
+    reason: str = ""
+
+
+@app.post("/api/bans")
+async def add_ban(body: BanBody):
+    cmd = f'banid {body.steamid} "{body.name}" "{body.reason}"'
+    await manager.send_command(cmd)
+    return {"success": True, "message": f"{body.steamid} banni."}
+
+
+@app.delete("/api/bans/{steamid}")
+async def remove_ban(steamid: str):
+    await manager.send_command(f"removeid {steamid}")
+    return {"success": True, "message": f"{steamid} débanni."}
+
+
+# ── Chat log routes ───────────────────────────────────────────────────────
+
+@app.get("/api/chat/log")
+async def get_chat_log(search: str = "", limit: int = 200):
+    return chat_log.get_lines(search=search, limit=limit)
+
+
+@app.delete("/api/chat/log")
+async def clear_chat_log():
+    chat_log.clear()
+    return {"success": True}
+
+
+# ── Oxide permissions routes ──────────────────────────────────────────────
+
+@app.get("/api/oxide/groups")
+async def get_oxide_groups():
+    return oxide_mod.get_groups(load_config())
+
+
+@app.get("/api/oxide/users")
+async def get_oxide_users():
+    return oxide_mod.get_users(load_config())
+
+
+class OxideCmdBody(BaseModel):
+    command: str  # e.g. "oxide.addgroup 76561198... default"
+
+
+@app.post("/api/oxide/cmd")
+async def oxide_cmd(body: OxideCmdBody):
+    await manager.send_command(body.command)
+    return {"success": True}
+
+
+# ── Monitor routes ────────────────────────────────────────────────────────
+
+@app.get("/api/monitor/metrics")
+async def get_metrics(minutes: int = 15):
+    return monitor.get_metrics(minutes)
+
+
+# ── Backup routes ─────────────────────────────────────────────────────────
+
+@app.get("/api/backup/config")
+async def get_backup_config():
+    return backup_mod.load_backup_config()
+
+
+@app.put("/api/backup/config")
+async def update_backup_config(body: ConfigUpdate):
+    backup_mod.save_backup_config(body.data)
+    return {"success": True}
+
+
+@app.get("/api/backup/list")
+async def list_backups():
+    cfg = backup_mod.load_backup_config()
+    return backup_mod.list_backups(cfg.get("backup_dir", ""))
+
+
+@app.get("/api/backup/progress")
+async def backup_progress():
+    return backup_mod.get_progress()
+
+
+@app.post("/api/backup/now")
+async def backup_now():
+    cfg = backup_mod.load_backup_config()
+    data_path = load_config().get("server_data_path", "").strip()
+    if not data_path:
+        return {"success": False, "message": "server_data_path non configuré"}
+    loop = asyncio.get_event_loop()
+    ok, msg = await loop.run_in_executor(
+        None, backup_mod.do_backup, data_path, cfg["backup_dir"], cfg["keep_last"]
+    )
+    if ok:
+        cfg["last_backup"] = __import__("time").time()
+        backup_mod.save_backup_config(cfg)
+    return {"success": ok, "message": msg}
+
+
+@app.delete("/api/backup/{filename}")
+async def delete_backup(filename: str):
+    cfg = backup_mod.load_backup_config()
+    ok, msg = backup_mod.delete_backup(cfg.get("backup_dir", ""), filename)
+    return {"success": ok, "message": msg}
+
+
+# ── RCON routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/rcon/status")
+async def rcon_status():
+    return rcon_client.get_status()
+
+
+class RconConnectBody(BaseModel):
+    host: str
+    port: int
+    password: str
+
+
+@app.post("/api/rcon/connect")
+async def rcon_connect(body: RconConnectBody):
+    ok, msg = await rcon_client.connect(body.host, body.port, body.password)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/rcon/disconnect")
+async def rcon_disconnect():
+    await rcon_client.disconnect()
+    return {"success": True}
+
+
+class RconCommandBody(BaseModel):
+    command: str
+
+
+@app.post("/api/rcon/command")
+async def rcon_command(body: RconCommandBody):
+    ok, response = await rcon_client.send_command(body.command)
+    return {"success": ok, "response": response}
+
+
+@app.get("/api/rcon/history")
+async def rcon_history():
+    return rcon_client.get_history()
+
+
+@app.delete("/api/rcon/history")
+async def rcon_clear_history():
+    rcon_client.clear_history()
+    return {"success": True}
+
+
+# ── Servers routes ───────────────────────────────────────────────────────
+
+@app.get("/api/servers")
+async def list_servers_route():
+    return {"servers": registry.list_servers()}
+
+
+class ServerCreateBody(BaseModel):
+    name: str
+    config: dict = {}
+
+
+@app.post("/api/servers")
+async def create_server(body: ServerCreateBody):
+    e = registry.add_server(body.name, body.config)
+    return {"success": True, "id": e.id, "name": e.name}
+
+
+class ServerUpdateBody(BaseModel):
+    name: str
+    config: dict = {}
+
+
+@app.put("/api/servers/{server_id}")
+async def update_server_route(server_id: str, body: ServerUpdateBody):
+    ok = registry.update_server(server_id, body.name, body.config)
+    return {"success": ok}
+
+
+@app.delete("/api/servers/{server_id}")
+async def delete_server_route(server_id: str):
+    ok, msg = registry.delete_server(server_id)
+    return {"success": ok, "message": msg}
+
+
+@app.post("/api/servers/{server_id}/select")
+async def select_server(server_id: str):
+    ok = registry.set_active(server_id)
+    return {"success": ok}
+
+
+@app.get("/api/servers/{server_id}/config")
+async def get_server_config(server_id: str):
+    cfg = registry.get_config(server_id)
+    if cfg is None:
+        return {"error": "Not found"}
+    return cfg
+
+
+@app.put("/api/servers/{server_id}/config")
+async def update_server_config(server_id: str, body: ConfigUpdate):
+    ok = registry.save_config(server_id, body.data)
+    return {"success": ok}
+
+
+# ── Map routes ────────────────────────────────────────────────────────────
+
+def _find_map_image(config: dict) -> Optional[Path]:
+    data_path = config.get("server_data_path", "").strip()
+    identity = config.get("server_identity", "rust_server")
+    if not data_path:
+        return None
+    root = Path(data_path)
+    for sub in [root / identity / "maps", root / "maps", root]:
+        for ext in ["*.jpg", "*.png"]:
+            matches = list(sub.glob(ext)) if sub.exists() else []
+            if matches:
+                return matches[0]
+    return None
+
+
+@app.get("/api/map/info")
+async def get_map_info():
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    seed = config.get("map_seed", 0)
+    size = config.get("map_size", 3500)
+    level = config.get("level", "Procedural Map")
+    has_img = _find_map_image(config) is not None
+    rustmaps_url = f"https://rustmaps.com/map/{size}/{seed}" if "Procedural" in str(level) else None
+    return {
+        "seed": seed,
+        "size": size,
+        "level": level,
+        "rustmaps_url": rustmaps_url,
+        "has_local_image": has_img,
+    }
+
+
+@app.get("/api/map/image")
+async def get_map_image():
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    img = _find_map_image(config)
+    if not img:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Aucune image de carte trouvée")
+    return FileResponse(str(img))
 
 
 # ── Serve React build ──────────────────────────────────────────────────────

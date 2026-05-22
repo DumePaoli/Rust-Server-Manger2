@@ -10,7 +10,17 @@ import PlayersPage from "./pages/PlayersPage";
 import WipePage from "./pages/WipePage";
 import InstallerPage from "./pages/InstallerPage";
 import AppSettings from "./pages/AppSettings";
+import MessagesPage from "./pages/MessagesPage";
+import DiscordPage from "./pages/DiscordPage";
+import TimesPage from "./pages/TimesPage";
+import RconPage from "./pages/RconPage";
+import BackupPage from "./pages/BackupPage";
+import BansPage from "./pages/BansPage";
+import ChatLogPage from "./pages/ChatLogPage";
+import OxidePage from "./pages/OxidePage";
+import ServersPage from "./pages/ServersPage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
+import { SettingsProvider } from "./contexts/SettingsContext";
 
 function ComingSoon({ title }) {
   return (
@@ -29,6 +39,7 @@ export default function App() {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   return (
+    <SettingsProvider>
     <div className="flex w-full min-h-screen bg-surface-900">
       <Sidebar
         updateInfo={updateInfo}
@@ -44,9 +55,15 @@ export default function App() {
           <Route path="/wipe" element={<WipePage />} />
           <Route path="/installer" element={<InstallerPage />} />
           <Route path="/app-settings" element={<AppSettings />} />
-          <Route path="/messages" element={<ComingSoon title="Messages" />} />
-          <Route path="/times" element={<ComingSoon title="Times" />} />
-          <Route path="/discord" element={<ComingSoon title="Discord Integration" />} />
+          <Route path="/messages" element={<MessagesPage />} />
+          <Route path="/times" element={<TimesPage />} />
+          <Route path="/discord" element={<DiscordPage />} />
+          <Route path="/rcon" element={<RconPage />} />
+          <Route path="/backup" element={<BackupPage />} />
+          <Route path="/bans" element={<BansPage />} />
+          <Route path="/chat" element={<ChatLogPage />} />
+          <Route path="/oxide" element={<OxidePage />} />
+          <Route path="/servers" element={<ServersPage />} />
         </Routes>
       </main>
 
@@ -58,5 +75,6 @@ export default function App() {
         />
       )}
     </div>
+    </SettingsProvider>
   );
 }
