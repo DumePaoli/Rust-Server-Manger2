@@ -109,19 +109,7 @@ class ServerManager:
 
         executable = config.get("server_executable", "")
         if not executable:
-            # Demo mode: simulate a running server
-            self._emit("=== DEMO MODE (no executable configured) ===")
-            self._emit("Server started in demo mode.")
-            self._emit(f"Server: {config.get('server_name', 'My Server')}")
-            self._emit(f"Port: {config.get('server_port', 28015)}")
-            self._emit(f"Max Players: {config.get('max_players', 100)}")
-            self._emit("Generating procedural map...")
-            self._emit("Server is ready! Waiting for connections...")
-            self._started_at = datetime.now()
-            # We use a fake process sentinel
-            self._process = _DemoProcess()
-            self.players.set_demo_players()
-            return True, "Server started in demo mode."
+            return False, "Aucun exécutable configuré. Renseignez le chemin dans Paramètres serveur → Avancé."
 
         if not Path(executable).exists():
             return False, f"Executable not found: {executable}"
@@ -222,12 +210,6 @@ class ServerManager:
     async def stop(self) -> tuple[bool, str]:
         if not self.is_running:
             return False, "Server is not running."
-        if isinstance(self._process, _DemoProcess):
-            self._process = None
-            self._started_at = None
-            self.players.clear()
-            self._emit("Demo server stopped.")
-            return True, "Demo server stopped."
         try:
             self._stopping = True
             self._process.terminate()
@@ -252,9 +234,6 @@ class ServerManager:
 
     async def send_command(self, command: str) -> None:
         self._emit(f"> {command}")
-        if isinstance(self._process, _DemoProcess):
-            self._emit(f"[Demo] Command '{command}' acknowledged.")
-            return
         if self._process and self._process.stdin:
             try:
                 self._process.stdin.write(command + "\n")
@@ -263,9 +242,3 @@ class ServerManager:
                 pass
 
 
-class _DemoProcess:
-    """Sentinel used in demo mode (no real subprocess)."""
-    pid = 99999
-
-    def poll(self):
-        return None  # appears always running
