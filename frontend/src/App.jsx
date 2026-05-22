@@ -15,6 +15,9 @@ import DiscordPage from "./pages/DiscordPage";
 import TimesPage from "./pages/TimesPage";
 import RconPage from "./pages/RconPage";
 import BackupPage from "./pages/BackupPage";
+import BansPage from "./pages/BansPage";
+import ChatLogPage from "./pages/ChatLogPage";
+import OxidePage from "./pages/OxidePage";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { SettingsProvider } from "./contexts/SettingsContext";
 
@@ -56,6 +59,9 @@ export default function App() {
           <Route path="/discord" element={<DiscordPage />} />
           <Route path="/rcon" element={<RconPage />} />
           <Route path="/backup" element={<BackupPage />} />
+          <Route path="/bans" element={<BansPage />} />
+          <Route path="/chat" element={<ChatLogPage />} />
+          <Route path="/oxide" element={<OxidePage />} />
         </Routes>
       </main>
 

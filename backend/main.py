@@ -23,8 +23,12 @@ import plugins as plugins_mod
 from rcon import rcon_client
 from monitor import monitor
 import backup as backup_mod
+import bans as bans_mod
+from chat_log import chat_log
+import oxide_perms as oxide_mod
 
 manager = ServerManager()
+manager.add_log_callback(chat_log.on_log_line)
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
 scheduler = MessageScheduler()
 scheduler.set_send_fn(manager.send_command)
@@ -543,6 +547,67 @@ class InstallServerBody(BaseModel):
 async def install_server(body: InstallServerBody):
     installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
     return {"success": True, "message": "Installation démarrée…"}
+
+
+# ── Bans routes ──────────────────────────────────────────────────────────
+
+@app.get("/api/bans")
+async def get_bans():
+    return bans_mod.list_bans(load_config())
+
+
+class BanBody(BaseModel):
+    steamid: str
+    name: str = ""
+    reason: str = ""
+
+
+@app.post("/api/bans")
+async def add_ban(body: BanBody):
+    cmd = f'banid {body.steamid} "{body.name}" "{body.reason}"'
+    await manager.send_command(cmd)
+    return {"success": True, "message": f"{body.steamid} banni."}
+
+
+@app.delete("/api/bans/{steamid}")
+async def remove_ban(steamid: str):
+    await manager.send_command(f"removeid {steamid}")
+    return {"success": True, "message": f"{steamid} débanni."}
+
+
+# ── Chat log routes ───────────────────────────────────────────────────────
+
+@app.get("/api/chat/log")
+async def get_chat_log(search: str = "", limit: int = 200):
+    return chat_log.get_lines(search=search, limit=limit)
+
+
+@app.delete("/api/chat/log")
+async def clear_chat_log():
+    chat_log.clear()
+    return {"success": True}
+
+
+# ── Oxide permissions routes ──────────────────────────────────────────────
+
+@app.get("/api/oxide/groups")
+async def get_oxide_groups():
+    return oxide_mod.get_groups(load_config())
+
+
+@app.get("/api/oxide/users")
+async def get_oxide_users():
+    return oxide_mod.get_users(load_config())
+
+
+class OxideCmdBody(BaseModel):
+    command: str  # e.g. "oxide.addgroup 76561198... default"
+
+
+@app.post("/api/oxide/cmd")
+async def oxide_cmd(body: OxideCmdBody):
+    await manager.send_command(body.command)
+    return {"success": True}
 
 
 # ── Monitor routes ────────────────────────────────────────────────────────
