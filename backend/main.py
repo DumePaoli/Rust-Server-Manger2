@@ -7,21 +7,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from typing import Optional
 from pathlib import Path
 
 from config import load_config, save_config
 from server_manager import ServerManager
 from version import VERSION, GITHUB_REPO
 from updater import UpdateChecker, apply_update, get_download_progress
+from messages import MessageScheduler, load_messages, save_messages
+from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
+from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
 
 manager = ServerManager()
 update_checker = UpdateChecker(VERSION, GITHUB_REPO)
+scheduler = MessageScheduler()
+scheduler.set_send_fn(manager.send_command)
+wipe_scheduler = WipeScheduler()
+wipe_scheduler.set_callbacks(manager.send_command, manager.stop, manager.start)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    scheduler.start()
+    wipe_scheduler.start()
     yield
+    scheduler.stop()
+    wipe_scheduler.stop()
     if manager.is_running:
         await manager.stop()
 
@@ -67,12 +79,16 @@ async def get_status():
 async def start_server():
     config = load_config()
     ok, msg = await manager.start(config)
+    if ok:
+        asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_start")
     return {"success": ok, "message": msg}
 
 
 @app.post("/api/stop")
 async def stop_server():
     ok, msg = await manager.stop()
+    if ok:
+        asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_stop")
     return {"success": ok, "message": msg}
 
 
@@ -131,6 +147,208 @@ async def console_ws(ws: WebSocket):
     finally:
         if ws in active_ws:
             active_ws.remove(ws)
+
+
+# ── Discord routes ────────────────────────────────────────────────────────
+
+@app.get("/api/discord/config")
+async def get_discord_config():
+    return load_discord_config()
+
+
+@app.put("/api/discord/config")
+async def update_discord_config(body: ConfigUpdate):
+    save_discord_config(body.data)
+    return {"success": True}
+
+
+class TestWebhookBody(BaseModel):
+    webhook_url: str
+    server_name: str = ""
+
+
+@app.post("/api/discord/test")
+async def test_discord_webhook(body: TestWebhookBody):
+    ok, err = discord.send_test(body.webhook_url, body.server_name)
+    return {"success": ok, "error": err}
+
+
+# ── Wipe routes ───────────────────────────────────────────────────────────
+
+@app.get("/api/wipe/status")
+async def wipe_status():
+    data = load_wipe_data()
+    secs = seconds_until_wipe(data.get("next_wipe"))
+    return {**data, "seconds_until_wipe": secs}
+
+
+class WipeScheduleBody(BaseModel):
+    next_wipe: Optional[str] = None
+    wipe_type: str = "map"
+    recurrence: str = "none"
+    warnings: list = [30, 10, 5, 1]
+
+
+@app.post("/api/wipe/schedule")
+async def set_wipe_schedule(body: WipeScheduleBody):
+    data = load_wipe_data()
+    data["next_wipe"] = body.next_wipe
+    data["wipe_type"] = body.wipe_type
+    data["recurrence"] = body.recurrence
+    data["warnings"] = body.warnings
+    save_wipe_data(data)
+    wipe_scheduler._warned.clear()
+    return {"success": True}
+
+
+@app.delete("/api/wipe/schedule")
+async def cancel_wipe_schedule():
+    data = load_wipe_data()
+    data["next_wipe"] = None
+    save_wipe_data(data)
+    return {"success": True}
+
+
+class WipeNowBody(BaseModel):
+    wipe_type: str = "map"
+
+
+@app.post("/api/wipe/now")
+async def wipe_now(body: WipeNowBody):
+    config = load_config()
+    data_path = config.get("server_data_path", "")
+    if not data_path:
+        return {"success": False, "error": "server_data_path non configuré dans Advanced Settings"}
+
+    from wipe import _delete_server_files
+    from datetime import datetime, timezone
+
+    if manager.is_running:
+        await manager.send_command("say [WIPE] Wipe manuel — le serveur redémarre...")
+        await asyncio.sleep(3)
+        await manager.stop()
+        await asyncio.sleep(3)
+
+    deleted, errors = _delete_server_files(data_path, body.wipe_type)
+
+    wipe_data = load_wipe_data()
+    history = wipe_data.get("history", [])
+    history.insert(0, {
+        "date": datetime.now(timezone.utc).isoformat(),
+        "type": body.wipe_type,
+        "files_deleted": deleted,
+        "errors": errors,
+        "manual": True,
+    })
+    wipe_data["history"] = history[:50]
+    save_wipe_data(wipe_data)
+
+    await asyncio.sleep(2)
+    await manager.start(config)
+    return {"success": True, "files_deleted": deleted, "errors": errors}
+
+
+# ── Players routes ────────────────────────────────────────────────────────
+
+@app.get("/api/players")
+async def get_players():
+    return manager.players.get_players()
+
+
+class PlayerActionBody(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/players/{steamid}/kick")
+async def kick_player(steamid: str, body: PlayerActionBody):
+    reason = body.reason or "Kicked by admin"
+    await manager.send_command(f"kick {steamid} \"{reason}\"")
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/ban")
+async def ban_player(steamid: str, body: PlayerActionBody):
+    players = manager.players.get_players()
+    name = next((p["name"] for p in players if p["steamid"] == steamid), steamid)
+    reason = body.reason or "Banned by admin"
+    await manager.send_command(f"banid {steamid} \"{name}\" \"{reason}\"")
+    asyncio.get_event_loop().run_in_executor(None, lambda: discord.send_event("player_ban", name=name))
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/mute")
+async def mute_player(steamid: str):
+    await manager.send_command(f"mute {steamid}")
+    return {"success": True}
+
+
+@app.post("/api/players/{steamid}/message")
+async def message_player(steamid: str, body: PlayerActionBody):
+    if body.reason:
+        await manager.send_command(f"say {body.reason}")
+    return {"success": True}
+
+
+# ── Messages routes ───────────────────────────────────────────────────────
+
+@app.get("/api/messages")
+async def get_messages():
+    return load_messages()
+
+
+class MessageBody(BaseModel):
+    text: str
+    interval_minutes: int = 5
+    enabled: bool = True
+    color: str = ""
+
+
+@app.post("/api/messages")
+async def create_message(body: MessageBody):
+    import uuid
+    messages = load_messages()
+    msg = {
+        "id": str(uuid.uuid4()),
+        "text": body.text,
+        "interval_minutes": body.interval_minutes,
+        "enabled": body.enabled,
+        "color": body.color,
+    }
+    messages.append(msg)
+    save_messages(messages)
+    return msg
+
+
+@app.put("/api/messages/{mid}")
+async def update_message(mid: str, body: MessageBody):
+    messages = load_messages()
+    for m in messages:
+        if m["id"] == mid:
+            m["text"] = body.text
+            m["interval_minutes"] = body.interval_minutes
+            m["enabled"] = body.enabled
+            m["color"] = body.color
+            save_messages(messages)
+            return m
+    return {"error": "Not found"}, 404
+
+
+@app.delete("/api/messages/{mid}")
+async def delete_message(mid: str):
+    messages = load_messages()
+    messages = [m for m in messages if m["id"] != mid]
+    save_messages(messages)
+    return {"success": True}
+
+
+@app.post("/api/messages/{mid}/test")
+async def test_message(mid: str):
+    messages = load_messages()
+    for m in messages:
+        if m["id"] == mid:
+            await manager.send_command(f"say {m['text']}")
+            return {"success": True}
+    return {"success": False, "error": "Not found"}
 
 
 # ── Update routes ─────────────────────────────────────────────────────────

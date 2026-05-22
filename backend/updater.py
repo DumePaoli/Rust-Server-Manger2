@@ -143,9 +143,11 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, f"Échec du téléchargement : {exc}"
 
     # PowerShell script runs fully detached and windowless.
-    # It kills this process by PID (more reliable than waiting for it to exit on its own —
-    # the batch `timeout` command hangs when there is no console window), then swaps the
-    # .update file in and restarts. Start-Sleep works fine without a console.
+    # It kills this process by PID — more reliable than relying on the process to exit
+    # on its own. The previous signal-file approach failed because webview.destroy() from
+    # a background thread doesn't reliably unblock webview.start() on Windows, and
+    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
+    # external TerminateProcess() call that bypasses all of that.
     ps_path = Path(str(current_exe) + "_update.ps1")
     ps = (
         "Start-Sleep -Seconds 1\n"
@@ -182,9 +184,8 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    # PowerShell will call Stop-Process on us in ~1 second.
-    # Sleep here so the frontend can poll progress.done = True before we die.
+    # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
     time.sleep(3)
-    # Hard fallback in case PowerShell didn't kill us
+    # Hard fallback in case Stop-Process didn't fire
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."

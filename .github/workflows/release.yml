@@ -7,42 +7,23 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version (e.g. 1.2.0)"
+        description: "Version (ex: 1.0.0)"
         required: true
         default: "1.0.0"
       changelog:
         description: "Changelog / release notes"
         required: false
-        default: ""
-
-permissions:
-  contents: write
+        default: "Release manuelle"
 
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve version and tag name
-        id: ver
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${{ github.ref_name }}"
-            VERSION="${VERSION#v}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION"    >> $GITHUB_OUTPUT
-
-      - name: Bump version.py
-        shell: bash
-        run: |
-          sed -i "s/^VERSION = .*/VERSION = \"${{ steps.ver.outputs.version }}\"/" backend/version.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -53,6 +34,29 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Resolve version and tag name
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "changelog=${{ github.event.inputs.changelog }}" >> $GITHUB_OUTPUT
+          else
+            TAG="${{ github.ref_name }}"
+            VER="${TAG#v}"
+            MSG=$(git tag -l --format='%(contents)' "$TAG" | head -50)
+            [ -z "$MSG" ] && MSG="Release $TAG"
+            echo "version=$VER" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
+            echo "changelog=$MSG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version.py
+        shell: bash
+        run: |
+          sed -i "s/^VERSION = .*/VERSION = \"${{ steps.meta.outputs.version }}\"/" backend/version.py
 
       - name: Build frontend
         run: |
@@ -98,32 +102,12 @@ jobs:
             --collect-all webview `
             launcher.py
 
-      - name: Resolve changelog body
-        id: changelog
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            BODY="${{ github.event.inputs.changelog }}"
-            if [ -z "$BODY" ]; then
-              BODY="Release v${{ steps.ver.outputs.version }}"
-            fi
-          else
-            TAG="${{ github.ref_name }}"
-            BODY=$(git tag -l --format='%(contents)' "$TAG" | head -50)
-            if [ -z "$BODY" ]; then
-              BODY="Release $TAG"
-            fi
-          fi
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$BODY"     >> $GITHUB_OUTPUT
-          echo "EOF"       >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "${{ steps.ver.outputs.tag }}"
-          name: "Rust Server Manager v${{ steps.ver.outputs.version }}"
-          body: ${{ steps.changelog.outputs.body }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "Rust Server Manager ${{ steps.meta.outputs.tag }}"
+          body: ${{ steps.meta.outputs.changelog }}
           files: dist/RustServerManager.exe
           draft: false
           prerelease: false
