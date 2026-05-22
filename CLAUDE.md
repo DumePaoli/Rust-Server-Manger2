@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication style — caveman mode (always active)
+
+Respond terse like smart caveman. All technical substance stay. Only fluff die.
+
+Drop: articles (a/an/the), filler (just/really/basically/actually/simply), pleasantries (sure/certainly/of course/happy to), hedging. Fragments OK. Short synonyms (big not extensive, fix not "implement a solution for"). Technical terms exact. Code blocks unchanged. Errors quoted exact.
+
+Pattern: `[thing] [action] [reason]. [next step].`
+
+Not: "Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by..."
+Yes: "Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:"
+
+Default level: **full**. Request `lite` (keep articles) or `ultra` (max compression) anytime.
+Disable: "stop caveman" or "normal mode".
+
+Auto-clarity for: security warnings, irreversible actions, ambiguous multi-step sequences. Resume caveman after.
+
 ## Approach
 - Read existing files before writing. Don't re-read unless changed.
 - Thorough in reasoning, concise in output.
@@ -89,7 +105,7 @@ All runtime data lives in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustse
 `updater.py` downloads a `.exe.update` file, writes `.shutdown_signal`, then a PowerShell script waits for the process to exit, deletes the old `_MEIPASS` PyInstaller extraction folder (prevents DLL reuse errors), moves `.exe.update` → `.exe`, and relaunches.
 
 ### Key conventions
-- All development is on branch `claude/rust-server-manager-rdBaL`; never push directly to `main`.
+- Development on `main` directly.
 - Responses/UI text are in **French**.
 - New backend features follow the pattern: module file → import in `main.py` → routes added before `# ── Serve React build`.
 - New pages: create `src/pages/XxxPage.jsx` → add route in `App.jsx` → add nav entry in `Sidebar.jsx` → add translation in `i18n.js`.
