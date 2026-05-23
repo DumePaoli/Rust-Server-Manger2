@@ -120,7 +120,9 @@ class ServerManager:
             kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
                 bufsize=0,
+                cwd=str(Path(executable).parent),
             )
             if sys.platform == "win32":
                 kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
