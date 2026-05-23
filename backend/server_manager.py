@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -116,12 +117,14 @@ class ServerManager:
 
         cmd = self._build_command(executable, config)
         try:
-            self._process = subprocess.Popen(
-                cmd,
+            kwargs = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=0,
             )
+            if sys.platform == "win32":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            self._process = subprocess.Popen(cmd, **kwargs)
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
