@@ -265,7 +265,13 @@ oFS.DeleteFile WScript.ScriptFullName, True
         return False, f"Impossible de lancer le script de remplacement : {exc}"
 
     _progress.done = True
-    # Give the frontend time to read progress.done, then exit.
+    # Give the frontend time to read progress.done, then trigger clean shutdown.
     time.sleep(3)
-    os._exit(0)
+    config_dir = os.environ.get("RSM_CONFIG_DIR", str(Path(sys.executable).parent))
+    shutdown_signal = os.path.join(config_dir, ".shutdown_signal")
+    try:
+        with open(shutdown_signal, "w") as f:
+            f.write("update")
+    except Exception:
+        os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
