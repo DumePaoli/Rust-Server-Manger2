@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import {
   Download, CheckCircle2, Circle, AlertCircle, RefreshCw,
-  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder, ShieldCheck,
+  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder, ShieldCheck, Shield,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -75,6 +75,8 @@ export default function InstallerPage() {
   const [serverDir, setServerDir] = useState("C:\\RustServer");
   const [working, setWorking] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
+  const [portsResult, setPortsResult] = useState(null);
+  const [portsWorking, setPortsWorking] = useState(false);
   const logRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -182,6 +184,21 @@ export default function InstallerPage() {
       });
       setConfigSaved(true);
     } catch { /* ignore */ }
+  };
+
+  // ── Open firewall ports ──────────────────────────────────────────────────
+
+  const handleOpenPorts = async () => {
+    setPortsWorking(true);
+    setPortsResult(null);
+    try {
+      const { data } = await axios.post(`${BASE}/api/installer/ports/open`, {});
+      setPortsResult(data);
+    } catch (e) {
+      setPortsResult({ success: false, message: "Erreur réseau", details: [] });
+    } finally {
+      setPortsWorking(false);
+    }
   };
 
   // ── When SteamCMD download finishes ─────────────────────────────────────
@@ -567,6 +584,39 @@ export default function InstallerPage() {
           </button>
         </div>
       )}
+
+      {/* Ports card */}
+      <div className="card space-y-3">
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-rust-400" />
+          <span className="text-sm font-medium text-gray-300">Pare-feu Windows</span>
+        </div>
+        <p className="text-xs text-gray-500">
+          Ouvre les ports 28015 (jeu), 28016 (RCON) et 28017 (query) dans le pare-feu Windows. Nécessite des droits administrateur.
+        </p>
+        <button
+          className="btn-secondary text-sm w-full justify-center"
+          onClick={handleOpenPorts}
+          disabled={portsWorking}
+        >
+          {portsWorking ? <RefreshCw size={13} className="animate-spin" /> : <Shield size={13} />}
+          {portsWorking ? "Ouverture en cours…" : "Ouvrir les ports dans le pare-feu"}
+        </button>
+        {portsResult && (
+          <div className={`rounded-lg p-3 text-xs space-y-1.5 ${portsResult.success ? "bg-green-900/25 border border-green-800" : "bg-red-900/25 border border-red-800"}`}>
+            <div className={`font-medium ${portsResult.success ? "text-green-300" : "text-red-300"}`}>
+              {portsResult.message}
+            </div>
+            {portsResult.details?.length > 0 && (
+              <div className="font-mono space-y-0.5 text-gray-400">
+                {portsResult.details.map((l, i) => (
+                  <div key={i} className={l.startsWith("OK") ? "text-green-500" : "text-red-400"}>{l}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

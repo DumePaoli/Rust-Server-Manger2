@@ -973,6 +973,63 @@ async def update_plugin(name: str):
     return {"success": ok, "message": msg}
 
 
+# ── Port opener ───────────────────────────────────────────────────────────
+
+class OpenPortsBody(BaseModel):
+    game_port: int = 28015
+    rcon_port: int = 28016
+    query_port: int = 28017
+
+
+@app.post("/api/installer/ports/open")
+async def open_ports(body: OpenPortsBody):
+    import sys
+    import subprocess as _sp
+
+    if sys.platform != "win32":
+        return {
+            "success": False,
+            "message": "Ouverture automatique uniquement sur Windows. Ouvrez les ports manuellement avec ufw ou iptables.",
+            "details": [],
+        }
+
+    rules = [
+        ("Rust Server Game UDP", "UDP", str(body.game_port)),
+        ("Rust Server Game TCP", "TCP", str(body.game_port)),
+        ("Rust Server RCON", "TCP", str(body.rcon_port)),
+        ("Rust Server Query UDP", "UDP", str(body.query_port)),
+    ]
+
+    details = []
+    errors = []
+    for name, proto, port in rules:
+        cmd = [
+            "netsh", "advfirewall", "firewall", "add", "rule",
+            f"name={name}",
+            "dir=in", "action=allow",
+            f"protocol={proto}",
+            f"localport={port}",
+        ]
+        try:
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=10)
+            ok = result.returncode == 0
+            line = f"{'OK' if ok else 'ERREUR'} — {name} ({proto}/{port})"
+            if not ok:
+                line += f": {(result.stdout or result.stderr or '').strip()}"
+                errors.append(line)
+            details.append(line)
+        except Exception as exc:
+            msg = f"ERREUR — {name}: {exc}"
+            details.append(msg)
+            errors.append(msg)
+
+    return {
+        "success": len(errors) == 0,
+        "message": "Ports ouverts avec succès." if not errors else f"{len(errors)} règle(s) échouée(s) — vérifiez les droits administrateur.",
+        "details": details,
+    }
+
+
 # ── Folder browser (desktop only) ─────────────────────────────────────────
 
 @app.get("/api/browse-folder")
