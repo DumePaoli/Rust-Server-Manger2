@@ -201,7 +201,9 @@ def _run_steamcmd(steamcmd_path: str, args: list) -> int:
         [steamcmd_path] + args,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
         bufsize=0,
+        **( {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {} ),
     )
     buf = b""
     while True:
