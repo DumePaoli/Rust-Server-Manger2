@@ -143,13 +143,22 @@ app.add_middleware(
 
 # ── WebSocket console clients ──────────────────────────────────────────────
 active_ws: list[WebSocket] = []
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+@app.on_event("startup")
+async def _capture_main_loop():
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
 
 
 def broadcast_log(line: str) -> None:
+    if _main_loop is None or not active_ws:
+        return
     dead = []
-    for ws in active_ws:
+    for ws in list(active_ws):
         try:
-            asyncio.get_event_loop().create_task(ws.send_text(line))
+            asyncio.run_coroutine_threadsafe(ws.send_text(line), _main_loop)
         except Exception:
             dead.append(ws)
     for ws in dead:

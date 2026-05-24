@@ -154,6 +154,7 @@ class ServerManager:
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
+            self._emit("En attente du serveur Rust (chargement de la carte, 30-120s)...")
             if sys.platform == "win32":
                 self._spawn_window_hider(self._process.pid)
             self._read_task = asyncio.create_task(self._read_output())
