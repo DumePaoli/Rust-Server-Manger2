@@ -160,6 +160,18 @@ class ServerManager:
             self._server_ready = False # reset ready flag for new process
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
+            # Diagnostic: log effective key parameters so the user can verify config
+            effective_hostname = str(config.get("server_name", "")).strip() or "Rust Server"
+            self._emit(
+                f"[RSM] Hostname: \"{effective_hostname}\" | "
+                f"Port: {config.get('server_port', 28015)} | "
+                f"QueryPort: {config.get('query_port', 28017)} | "
+                f"RCONPort: {config.get('rcon_port', 28016)}"
+            )
+            self._emit(
+                "[RSM] Note: le Steam server browser met 5-15 min à se mettre à jour. "
+                "Assurez-vous que le port QueryPort (UDP) est ouvert dans le pare-feu Windows."
+            )
             self._read_task = asyncio.create_task(self._read_output())
             self._stderr_task = asyncio.create_task(self._read_stderr())
             return True, f"Server started (PID {self._process.pid})"

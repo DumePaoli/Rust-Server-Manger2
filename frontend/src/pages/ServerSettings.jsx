@@ -374,6 +374,15 @@ export default function ServerSettings() {
                   onChange={e => set("app_port", Number(e.target.value))} />
               </Field>
             </div>
+            <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-xs text-yellow-300 space-y-1">
+              <p className="font-semibold">Ports à ouvrir dans le pare-feu Windows (UDP + TCP)</p>
+              <ul className="list-disc list-inside space-y-0.5 text-yellow-200/80">
+                <li><span className="font-mono">{config.server_port || 28015}</span> — connexion joueurs</li>
+                <li><span className="font-mono">{config.query_port || 28017}</span> — Steam A2S (compteur joueurs &amp; infos serveur)</li>
+                <li><span className="font-mono">{config.rcon_port || 28016}</span> — RCON</li>
+              </ul>
+              <p className="text-yellow-200/60">Si le Query Port est bloqué, le Steam server browser affichera "Development Server" avec 0 joueurs.</p>
+            </div>
           </div>
         )}
 
