@@ -157,9 +157,9 @@ def _download_steamcmd_thread(install_dir: str) -> None:
             _progress.error = "Exécutable SteamCMD introuvable après extraction."
             _progress.log(_progress.error)
 
-    except PermissionError:
+    except PermissionError as exc:
         msg = (
-            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+            f"Accès refusé — relancez le logiciel en tant qu'Administrateur "
             "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
         )
         _progress.error = msg
@@ -174,6 +174,140 @@ def _download_steamcmd_thread(install_dir: str) -> None:
 def start_download_steamcmd(install_dir: str) -> None:
     t = threading.Thread(target=_download_steamcmd_thread, args=(install_dir,), daemon=True)
     t.start()
+
+
+def _parse_progress(line: str) -> None:
+    if "progress:" in line.lower():
+        try:
+            pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
+            _progress.percent = min(99, int(float(pct_str)))
+        except Exception:
+            pass
+
+
+# Rust Dedicated Server is ~22 GB uncompressed. Used to estimate download %.
+_RUST_EXPECTED_BYTES = 22 * 1024 ** 3
+
+
+def _dir_size_monitor(server_dir: str, stop_event: threading.Event, base_pct: int = 5) -> None:
+    """Estimate install progress by watching how much data SteamCMD has written."""
+    p = Path(server_dir)
+    while not stop_event.is_set():
+        try:
+            total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            pct = base_pct + int(total * (99 - base_pct) / _RUST_EXPECTED_BYTES)
+            pct = min(99, pct)
+            if pct > _progress.percent:
+                _progress.percent = pct
+        except Exception:
+            pass
+        stop_event.wait(3)
+
+
+def _tail_log_file(log_path: str, stop_event: threading.Event) -> None:
+    """Read SteamCMD's own log file in parallel to catch buffered output."""
+    try:
+        p = Path(log_path)
+        seen = 0
+        while not stop_event.is_set():
+            if p.exists():
+                size = p.stat().st_size
+                if size > seen:
+                    with open(p, "r", encoding="utf-8", errors="replace") as f:
+                        f.seek(seen)
+                        for raw in f:
+                            line = raw.strip()
+                            if line:
+                                _progress.log(f"[log] {line}")
+                                _parse_progress(line)
+                    seen = size
+            threading.Event().wait(0.8)
+    except Exception:
+        pass
+
+
+def _is_admin() -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _run_steamcmd(steamcmd_path: str, args: list) -> int:
+    steamcmd_dir = str(Path(steamcmd_path).parent)
+    log_path = os.path.join(steamcmd_dir, "logs", "stderr.txt")
+
+    stop_tail = threading.Event()
+    tail_thread = threading.Thread(target=_tail_log_file, args=(log_path, stop_tail), daemon=True)
+    tail_thread.start()
+
+    _progress.log(f"Exécution : {steamcmd_path}")
+
+    try:
+        proc = subprocess.Popen(
+            [steamcmd_path] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            bufsize=0,
+            **( {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {} ),
+        )
+    except PermissionError as exc:
+        stop_tail.set()
+        tail_thread.join(timeout=2)
+        winerr = getattr(exc, "winerror", None)
+        exists = os.path.isfile(steamcmd_path)
+        already_admin = _is_admin() if sys.platform == "win32" else False
+        _progress.log(f"[diagnostic] winerror={winerr} exists={exists} admin={already_admin}")
+        if not exists:
+            raise PermissionError(
+                f"steamcmd.exe introuvable : '{steamcmd_path}'. "
+                "Réinstallez SteamCMD via l'onglet Installer."
+            )
+        elif already_admin:
+            raise PermissionError(
+                f"Accès refusé à '{steamcmd_path}' (code {winerr}) malgré les droits administrateur. "
+                "Cause probable : Windows Defender ou un antivirus bloque l'exécution de steamcmd.exe. "
+                "Solutions : "
+                "(1) Ouvrez Windows Defender → Protection contre les virus → Exclusions → ajoutez le dossier contenant steamcmd.exe ; "
+                "(2) Désactivez temporairement la protection en temps réel puis relancez ; "
+                "(3) Déplacez steamcmd.exe vers C:\\steamcmd\\ (dossier moins surveillé)."
+            )
+        else:
+            raise PermissionError(
+                "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+                "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+            )
+    except OSError as exc:
+        stop_tail.set()
+        tail_thread.join(timeout=2)
+        raise OSError(
+            f"Impossible de lancer steamcmd.exe (erreur {exc.winerror if hasattr(exc, 'winerror') else exc.errno}) : {exc.strerror}. "
+            f"Chemin : '{steamcmd_path}'"
+        ) from exc
+
+    buf = b""
+    while True:
+        chunk = proc.stdout.read(4096)
+        if not chunk:
+            break
+        buf += chunk
+        parts = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
+        buf = parts[-1]
+        for part in parts[:-1]:
+            line = part.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            _progress.log(line)
+            _parse_progress(line)
+    if buf.strip():
+        _progress.log(buf.decode("utf-8", errors="replace").strip())
+
+    proc.wait()
+    stop_tail.set()
+    tail_thread.join(timeout=2)
+    return proc.returncode
 
 
 def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
@@ -196,54 +330,42 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     _progress.log(f"SteamCMD : {steamcmd_path}")
     _progress.log(f"Dossier serveur : {server_dir}")
     _progress.log(f"App ID : {RUST_APP_ID} (Rust Dedicated Server)")
-    _progress.log("Démarrage de l'installation...")
     _progress.log("─" * 40)
 
-    cmd = [
-        steamcmd_path,
-        "+force_install_dir", server_dir,
-        "+login", "anonymous",
-        "+app_update", RUST_APP_ID, "validate",
-        "+quit",
-    ]
-
     try:
-        kwargs = dict(
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        proc = subprocess.Popen(cmd, **kwargs)
-
-        for line in proc.stdout:
-            line = line.rstrip()
-            if not line:
-                continue
-            _progress.log(line)
-            # Parse SteamCMD progress lines like "Update state (0x61) downloading, progress: 45.32 (1234 / 2720)"
-            if "progress:" in line.lower():
-                try:
-                    pct_str = line.split("progress:")[1].strip().split()[0].rstrip("(")
-                    pct = float(pct_str)
-                    _progress.percent = min(99, int(pct))
-                except Exception:
-                    pass
-
-        proc.wait()
+        # Pass 1: let SteamCMD self-update before the actual install
+        _progress.log("Étape 1/2 — Mise à jour de SteamCMD...")
+        _run_steamcmd(steamcmd_path, ["+quit"])
         _progress.log("─" * 40)
 
-        if proc.returncode == 0:
-            if sys.platform == "win32":
-                exe = os.path.join(server_dir, "RustDedicated.exe")
-            else:
-                exe = os.path.join(server_dir, "RustDedicated")
+        # Pass 2: install Rust server
+        _progress.log("Étape 2/2 — Téléchargement du serveur Rust...")
+        _progress.log("(peut prendre 20-40 minutes)")
+        _progress.log("─" * 40)
+        _progress.percent = 5  # show we've started
 
+        stop_size_mon = threading.Event()
+        size_mon = threading.Thread(
+            target=_dir_size_monitor,
+            args=(server_dir, stop_size_mon, 5),
+            daemon=True,
+        )
+        size_mon.start()
+
+        ret = _run_steamcmd(steamcmd_path, [
+            "+force_install_dir", server_dir,
+            "+login", "anonymous",
+            "+app_update", RUST_APP_ID, "validate",
+            "+quit",
+        ])
+
+        stop_size_mon.set()
+        size_mon.join(timeout=1)
+
+        _progress.log("─" * 40)
+
+        if ret == 0:
+            exe = os.path.join(server_dir, "RustDedicated.exe" if sys.platform == "win32" else "RustDedicated")
             if os.path.isfile(exe):
                 _progress.percent = 100
                 _progress.status = "done"
@@ -255,14 +377,16 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
                 _progress.log(_progress.error)
         else:
             _progress.status = "error"
-            _progress.error = f"SteamCMD a retourné le code {proc.returncode}"
+            _progress.error = f"SteamCMD a retourné le code {ret} — vérifiez votre connexion et que les ports UDP 27015-27030 sont ouverts."
             _progress.log(_progress.error)
 
     except PermissionError as exc:
-        msg = (
-            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
-            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
-        )
+        msg = str(exc)
+        if "Administrateur" not in msg and "antivirus" not in msg and "introuvable" not in msg:
+            msg = (
+                "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+                "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+            )
         _progress.error = msg
         _progress.status = "error"
         _progress.log(f"Erreur : {msg}")
