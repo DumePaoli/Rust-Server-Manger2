@@ -141,9 +141,9 @@ class ServerRegistry:
     def add_log_callback(self, cb) -> None:
         if cb not in self._log_cbs:
             self._log_cbs.append(cb)
-        m = self.get_active_manager()
-        if m:
-            m.add_log_callback(cb)
+            m = self.get_active_manager()
+            if m:
+                m.add_log_callback(cb)
 
     def set_on_active_change(self, cb) -> None:
         self._on_active_change = cb

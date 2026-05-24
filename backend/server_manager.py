@@ -44,7 +44,8 @@ class ServerManager:
         self._last_crash_at: Optional[str] = None
 
     def add_log_callback(self, cb: Callable[[str], None]) -> None:
-        self._log_callbacks.append(cb)
+        if cb not in self._log_callbacks:
+            self._log_callbacks.append(cb)
 
     def remove_log_callback(self, cb: Callable[[str], None]) -> None:
         self._log_callbacks.discard(cb) if hasattr(self._log_callbacks, "discard") else None
@@ -120,7 +121,7 @@ class ServerManager:
         try:
             popen_kwargs: dict = dict(
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.DEVNULL,  # discard stderr — merging causes duplicate lines
                 text=True,
                 bufsize=1,
                 cwd=server_dir,
