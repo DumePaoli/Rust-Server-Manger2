@@ -1024,6 +1024,28 @@ async def update_plugin(name: str):
     return {"success": ok, "message": msg}
 
 
+# ── Frameworks (Carbon / Oxide) ────────────────────────────────────────────
+
+@app.get("/api/frameworks")
+async def get_frameworks():
+    loop = asyncio.get_event_loop()
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    status = await loop.run_in_executor(None, plugins_mod.get_framework_status, config)
+    return status
+
+
+@app.post("/api/frameworks/{name}/install")
+async def install_framework_route(name: str):
+    if name not in ("carbon", "oxide"):
+        raise HTTPException(status_code=400, detail="Framework inconnu")
+    loop = asyncio.get_event_loop()
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    ok, msg = await loop.run_in_executor(None, plugins_mod.install_framework, config, name)
+    return {"success": ok, "message": msg}
+
+
 # ── Folder browser (desktop only) ─────────────────────────────────────────
 
 @app.get("/api/browse-folder")

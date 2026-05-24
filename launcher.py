@@ -3,6 +3,9 @@ import os
 import threading
 import time
 import socket
+import base64
+import subprocess
+from pathlib import Path
 
 # ── Path setup (works both in dev and PyInstaller .exe) ───────────────────
 if getattr(sys, 'frozen', False):
@@ -73,8 +76,60 @@ def _shutdown_watcher() -> None:
             break
 
 
+# ── Pending update auto-retry ─────────────────────────────────────────────
+def _retry_pending_update() -> bool:
+    """If a previous update attempt left .exe.update + _update.ps1 behind
+    (PowerShell killed by parent's Job Object before it could replace the exe),
+    relaunch the script via ShellExecuteW so it runs outside any job, then exit.
+    Returns True if a retry was launched (caller should exit immediately)."""
+    if not (getattr(sys, "frozen", False) and sys.platform == "win32"):
+        return False
+    current_exe = Path(sys.executable)
+    update_file = Path(str(current_exe) + ".update")
+    ps1_file    = Path(str(current_exe) + "_update.ps1")
+    if not (update_file.exists() and ps1_file.exists()):
+        return False
+    try:
+        ps_content = ps1_file.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    encoded = base64.b64encode(ps_content.encode("utf-16-le")).decode("ascii")
+    ps_args = (
+        f"-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass "
+        f"-EncodedCommand {encoded}"
+    )
+    launched = False
+    try:
+        import ctypes
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, "open", "powershell.exe", ps_args, None, 0,
+        )
+        launched = int(ret) > 32
+    except Exception:
+        pass
+    if not launched:
+        try:
+            subprocess.Popen(
+                ["powershell", "-NonInteractive", "-WindowStyle", "Hidden",
+                 "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                creationflags=0x01000000 | 0x08000000 | 0x00000008,
+                close_fds=True,
+            )
+            launched = True
+        except Exception:
+            pass
+    if launched:
+        time.sleep(5)
+        os._exit(0)
+    return launched
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 def main():
+    # Apply any pending update left over from a previous run (job-object kill)
+    if _retry_pending_update():
+        return
+
     # Clean up any leftover signal from a previous crashed update
     if os.path.exists(SHUTDOWN_SIGNAL):
         os.unlink(SHUTDOWN_SIGNAL)

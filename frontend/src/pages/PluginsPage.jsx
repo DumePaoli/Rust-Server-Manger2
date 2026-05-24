@@ -3,7 +3,7 @@ import axios from "axios";
 import {
   Package, Search, Download, RefreshCw, Trash2,
   RotateCcw, AlertCircle, Check, X, ExternalLink,
-  ChevronLeft, ChevronRight, ArrowUpCircle,
+  ChevronLeft, ChevronRight, ArrowUpCircle, Layers,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -326,22 +326,170 @@ function SearchTab({ msg, setMsg }) {
   );
 }
 
+// ── Frameworks tab ───────────────────────────────────────────────────────
+
+const FRAMEWORK_META = {
+  carbon: {
+    label: "Carbon",
+    color: "text-orange-400",
+    bg: "bg-orange-500/10 border-orange-500/30",
+    description: "Framework de modding haute performance pour Rust. Remplace Oxide avec de meilleures performances et une compatibilité Harmony.",
+    url: "https://carbonmod.gg",
+  },
+  oxide: {
+    label: "Oxide / uMod",
+    color: "text-green-400",
+    bg: "bg-green-500/10 border-green-500/30",
+    description: "Framework de modding historique pour Rust. Compatible avec la grande majorité des plugins uMod disponibles.",
+    url: "https://umod.org",
+  },
+};
+
+function FrameworkCard({ name, info, onInstall, installing }) {
+  const meta = FRAMEWORK_META[name];
+  return (
+    <div className={`card border ${meta.bg} space-y-3`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-10 h-10 rounded-lg bg-surface-600 flex items-center justify-center shrink-0">
+            <Layers size={18} className={meta.color} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-sm font-semibold ${meta.color}`}>{meta.label}</span>
+              {info?.installed && (
+                <span className="text-[10px] font-medium bg-green-500/20 text-green-400 border border-green-500/30 px-1.5 py-0.5 rounded">
+                  Installé
+                </span>
+              )}
+            </div>
+            {info?.latest_version && (
+              <div className="text-[11px] text-gray-500 font-mono mt-0.5">
+                {info.installed ? "Dernière version:" : "Disponible:"} {info.latest_version}
+              </div>
+            )}
+          </div>
+        </div>
+        <a href={meta.url} target="_blank" rel="noreferrer"
+          className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-surface-600 transition-colors shrink-0">
+          <ExternalLink size={13} />
+        </a>
+      </div>
+
+      <p className="text-xs text-gray-400 leading-relaxed">{meta.description}</p>
+
+      <button
+        onClick={() => onInstall(name)}
+        disabled={installing}
+        className="btn-primary text-xs py-2 w-full justify-center"
+      >
+        {installing
+          ? <><RefreshCw size={12} className="animate-spin" /> Installation en cours…</>
+          : info?.installed
+            ? <><ArrowUpCircle size={12} /> Réinstaller / Mettre à jour</>
+            : <><Download size={12} /> Installer {meta.label}</>
+        }
+      </button>
+    </div>
+  );
+}
+
+function FrameworksTab({ msg, setMsg }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [installing, setInstalling] = useState({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: d } = await axios.get(`${BASE}/api/frameworks`);
+      setData(d);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const flash = (ok, text) => {
+    setMsg({ ok, text });
+    setTimeout(() => setMsg(null), 6000);
+  };
+
+  const handleInstall = async (name) => {
+    setInstalling(s => ({ ...s, [name]: true }));
+    try {
+      const { data: r } = await axios.post(`${BASE}/api/frameworks/${name}/install`);
+      flash(r.success, r.message);
+      if (r.success) load();
+    } catch (err) {
+      flash(false, err?.response?.data?.detail || "Erreur lors de l'installation.");
+    }
+    setInstalling(s => ({ ...s, [name]: false }));
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><RefreshCw size={20} className="animate-spin text-gray-500" /></div>;
+
+  const noDir = data && !data.carbon?.server_dir && !data.oxide?.server_dir;
+
+  return (
+    <div className="space-y-4">
+      {noDir && (
+        <div className="card flex items-start gap-3">
+          <AlertCircle size={18} className="text-yellow-400 shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-medium text-yellow-300">Exécutable serveur non configuré</div>
+            <div className="text-xs text-gray-400 mt-1">
+              Configurez le <strong className="text-gray-300">Server Executable</strong> dans <em>Server Settings → Advanced</em> pour que le framework soit extrait au bon endroit.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="text-xs text-gray-500 leading-relaxed">
+        Les frameworks sont extraits dans le dossier de l'exécutable serveur ({data?.carbon?.server_dir
+          ? <span className="font-mono text-gray-400">{data.carbon.server_dir}</span>
+          : <em>non configuré</em>
+        }). Arrêtez le serveur avant d'installer.
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {["carbon", "oxide"].map(name => (
+          <FrameworkCard
+            key={name}
+            name={name}
+            info={data?.[name]}
+            onInstall={handleInstall}
+            installing={!!installing[name]}
+          />
+        ))}
+      </div>
+
+      <div className="text-xs text-gray-600 text-center">
+        N'installez pas Carbon et Oxide simultanément sur le même serveur.
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ────────────────────────────────────────────────────────────
 
 export default function PluginsPage() {
-  const [tab, setTab] = useState("installed");
+  const [tab, setTab] = useState("frameworks");
   const [msg, setMsg] = useState(null);
 
   return (
     <div className="p-6 max-w-2xl space-y-5">
       <div>
         <h2 className="text-lg font-semibold text-gray-100">Plugins</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Gérez vos plugins Oxide/uMod</p>
+        <p className="text-sm text-gray-500 mt-0.5">Gérez vos frameworks et plugins Oxide/Carbon</p>
       </div>
 
       <StatusMsg msg={msg} />
 
       <div className="flex gap-1 border-b border-surface-600 pb-1">
+        <TabBtn active={tab === "frameworks"} onClick={() => setTab("frameworks")}>
+          Frameworks
+        </TabBtn>
         <TabBtn active={tab === "installed"} onClick={() => setTab("installed")}>
           Installés
         </TabBtn>
@@ -350,8 +498,9 @@ export default function PluginsPage() {
         </TabBtn>
       </div>
 
-      {tab === "installed" && <InstalledTab msg={msg} setMsg={setMsg} />}
-      {tab === "search"    && <SearchTab    msg={msg} setMsg={setMsg} />}
+      {tab === "frameworks" && <FrameworksTab msg={msg} setMsg={setMsg} />}
+      {tab === "installed"  && <InstalledTab  msg={msg} setMsg={setMsg} />}
+      {tab === "search"     && <SearchTab     msg={msg} setMsg={setMsg} />}
     </div>
   );
 }
