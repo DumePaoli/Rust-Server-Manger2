@@ -265,13 +265,32 @@ oFS.DeleteFile WScript.ScriptFullName, True
         return False, f"Impossible de lancer le script de remplacement : {exc}"
 
     _progress.done = True
-    # Give the frontend time to read progress.done, then trigger clean shutdown.
+    # Give the frontend time to read progress.done.
     time.sleep(3)
-    config_dir = os.environ.get("RSM_CONFIG_DIR", str(Path(sys.executable).parent))
-    shutdown_signal = os.path.join(config_dir, ".shutdown_signal")
+    # Kill any WebView2 / Edge child processes so they release DLL handles
+    # inside _MEIPASS before the temp dir gets removed.
     try:
-        with open(shutdown_signal, "w") as f:
-            f.write("update")
+        import psutil
+        me = psutil.Process()
+        for child in me.children(recursive=True):
+            try:
+                child.kill()
+            except Exception:
+                pass
     except Exception:
+        pass
+    # Hard-terminate the process so the PyInstaller bootloader skips its
+    # _MEIPASS cleanup step (which pops the "Failed to remove temporary
+    # directory" warning when WebView2 still holds DLLs). The VBScript
+    # cleans the temp dir asynchronously with retries.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.TerminateProcess(
+                ctypes.windll.kernel32.GetCurrentProcess(), 0
+            )
+        except Exception:
+            os._exit(0)
+    else:
         os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
