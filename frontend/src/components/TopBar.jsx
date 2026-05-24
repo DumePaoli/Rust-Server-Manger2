@@ -53,15 +53,20 @@ export default function TopBar({ title }) {
         )}
 
         {/* Status badge */}
-        {status.running ? (
+        {status.running && status.server_ready ? (
           <span className="badge-online">
             <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            Online
+            En ligne
+          </span>
+        ) : status.running ? (
+          <span className="flex items-center gap-1.5 text-xs font-medium text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-full">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />
+            Démarrage...
           </span>
         ) : (
           <span className="badge-offline">
             <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-            Offline
+            Hors ligne
           </span>
         )}
 

@@ -232,8 +232,11 @@ export default function ServersPage() {
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-3">
                   <span>Port {s.port}</span>
-                  <span className={s.running ? "text-green-400" : "text-gray-600"}>
-                    {s.running ? "En ligne" : "Hors ligne"}
+                  <span className={
+                    s.running && s.server_ready ? "text-green-400" :
+                    s.running ? "text-yellow-400" : "text-gray-600"
+                  }>
+                    {s.running && s.server_ready ? "En ligne" : s.running ? "Démarrage..." : "Hors ligne"}
                   </span>
                 </div>
               </div>

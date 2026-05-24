@@ -16,6 +16,7 @@ from players import PlayerManager
 @dataclass
 class ServerStatus:
     running: bool = False
+    server_ready: bool = False
     pid: Optional[int] = None
     uptime_seconds: int = 0
     cpu_percent: float = 0.0
@@ -24,6 +25,16 @@ class ServerStatus:
     auto_restart: bool = False
     restart_count: int = 0
     last_crash_at: Optional[str] = None
+
+
+# Log patterns that confirm the server is accepting connections.
+_READY_PATTERNS = [
+    "server startup complete",
+    "server startup time",
+    "oxide v",           # Oxide/uMod loads after server is ready
+    "listening on port",
+    "listening: steam",
+]
 
 
 class ServerManager:
@@ -42,6 +53,7 @@ class ServerManager:
         self._auto_restart_max: int = 5
         self._restart_count: int = 0
         self._last_crash_at: Optional[str] = None
+        self._server_ready: bool = False
 
     def add_log_callback(self, cb: Callable[[str], None]) -> None:
         self._log_callbacks.append(cb)
@@ -58,6 +70,10 @@ class ServerManager:
         if len(self._console_log) > 500:
             self._console_log = self._console_log[-500:]
         self.players.on_log_line(line)
+        if not self._server_ready:
+            low = line.lower()
+            if any(pat in low for pat in _READY_PATTERNS):
+                self._server_ready = True
         for cb in self._log_callbacks:
             try:
                 cb(entry)
@@ -77,7 +93,7 @@ class ServerManager:
             last_crash_at=self._last_crash_at,
         )
         if not self.is_running or self._process is None:
-            return ServerStatus(running=False, **base)
+            return ServerStatus(running=False, server_ready=False, **base)
         try:
             proc = psutil.Process(self._process.pid)
             mem = proc.memory_info().rss / (1024 * 1024)
@@ -85,6 +101,7 @@ class ServerManager:
             uptime = int((datetime.now() - self._started_at).total_seconds()) if self._started_at else 0
             return ServerStatus(
                 running=True,
+                server_ready=self._server_ready,
                 pid=self._process.pid,
                 uptime_seconds=uptime,
                 cpu_percent=cpu,
@@ -93,7 +110,7 @@ class ServerManager:
                 **base,
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return ServerStatus(running=False, **base)
+            return ServerStatus(running=False, server_ready=False, **base)
 
     def get_console_log(self) -> list[str]:
         return self._console_log.copy()
@@ -104,6 +121,7 @@ class ServerManager:
 
         self._config = config
         self._stopping = False
+        self._server_ready = False
         self._auto_restart = bool(config.get("auto_restart", False))
         self._auto_restart_delay = int(config.get("auto_restart_delay", 10))
         self._auto_restart_max = int(config.get("auto_restart_max", 5))
@@ -280,6 +298,7 @@ class ServerManager:
             return False, "Server is not running."
         try:
             self._stopping = True
+            self._server_ready = False
             self._process.terminate()
             self._emit("SIGTERM sent to server process...")
             await asyncio.sleep(5)
