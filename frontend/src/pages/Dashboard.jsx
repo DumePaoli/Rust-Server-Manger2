@@ -110,7 +110,7 @@ function QuickLink({ to, icon: Icon, label }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [status, setStatus] = useState({ running: false, cpu_percent: 0, memory_mb: 0, uptime_seconds: 0, pid: null, started_at: null });
+  const [status, setStatus] = useState({ running: false, server_ready: false, cpu_percent: 0, memory_mb: 0, uptime_seconds: 0, pid: null, started_at: null });
   const [config, setConfig] = useState(null);
   const [players, setPlayers] = useState([]);
   const [wipe, setWipe] = useState(null);
@@ -221,10 +221,14 @@ export default function Dashboard() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-gray-100">{serverName}</h1>
-            {status.running ? (
-              <span className="badge-online"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />Online</span>
+            {status.running && status.server_ready ? (
+              <span className="badge-online"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />En ligne</span>
+            ) : status.running ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse" />Démarrage...
+              </span>
             ) : (
-              <span className="badge-offline"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Offline</span>
+              <span className="badge-offline"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Hors ligne</span>
             )}
           </div>
           {status.running && status.started_at && (

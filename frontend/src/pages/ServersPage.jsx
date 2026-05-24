@@ -218,7 +218,7 @@ export default function ServersPage() {
               className={`card flex items-center gap-4 transition-colors ${s.active ? "border-rust-700/60 bg-rust-600/5" : ""}`}
             >
               {/* Status dot */}
-              <div className={`w-2 h-2 rounded-full shrink-0 ${s.running ? "bg-green-400 animate-pulse" : "bg-surface-500"}`} />
+              <div className={`w-2 h-2 rounded-full shrink-0 ${s.running && s.server_ready ? "bg-green-400 animate-pulse" : s.running ? "bg-yellow-400 animate-pulse" : "bg-surface-500"}`} />
 
               {/* Info */}
               <div className="flex-1 min-w-0">

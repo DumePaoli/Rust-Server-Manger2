@@ -82,7 +82,7 @@ function ServerSwitcher() {
               onClick={() => handleSelect(s.id)}
               className="w-full flex items-center gap-2 px-3 py-2 hover:bg-surface-600 transition-colors text-left"
             >
-              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.running ? "bg-green-400" : "bg-surface-400"}`} />
+              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.running && s.server_ready ? "bg-green-400" : s.running ? "bg-yellow-400 animate-pulse" : "bg-surface-400"}`} />
               <span className="flex-1 text-xs text-gray-300 truncate">{s.name}</span>
               {s.active && <Check size={11} className="text-rust-400 shrink-0" />}
             </button>
