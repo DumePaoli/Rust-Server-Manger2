@@ -33,6 +33,8 @@ class ServerManager:
         self._console_log: list[str] = []
         self._log_callbacks: list[Callable[[str], None]] = []
         self._read_task: Optional[asyncio.Task] = None
+        self._stderr_task: Optional[asyncio.Task] = None
+        self._last_raw: str = ""          # dedup: skip consecutive identical lines
         self.players = PlayerManager()
         # Auto-restart state
         self._config: Optional[dict] = None
@@ -53,6 +55,10 @@ class ServerManager:
             self._log_callbacks.remove(cb)
 
     def _emit(self, line: str) -> None:
+        # Skip consecutive identical lines — stdout+stderr can carry same content
+        if line and line == self._last_raw:
+            return
+        self._last_raw = line
         timestamp = datetime.now().strftime("%H:%M:%S")
         entry = f"[{timestamp}] {line}"
         self._console_log.append(entry)
@@ -121,7 +127,7 @@ class ServerManager:
         try:
             popen_kwargs: dict = dict(
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,  # discard stderr — merging causes duplicate lines
+                stderr=subprocess.PIPE,   # read separately; dedup handles identical lines
                 text=True,
                 bufsize=1,
                 cwd=server_dir,
@@ -134,9 +140,11 @@ class ServerManager:
                 popen_kwargs["startupinfo"] = si
             self._process = subprocess.Popen(cmd, **popen_kwargs)
             self._started_at = datetime.now()
+            self._last_raw = ""  # reset dedup state on new process
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
             self._read_task = asyncio.create_task(self._read_output())
+            self._stderr_task = asyncio.create_task(self._read_stderr())
             return True, f"Server started (PID {self._process.pid})"
         except Exception as e:
             return False, str(e)
@@ -220,6 +228,20 @@ class ServerManager:
                     f"[Auto-restart] Nombre maximum de redémarrages atteint ({self._auto_restart_max}). "
                     "Intervention manuelle requise."
                 )
+
+    async def _read_stderr(self) -> None:
+        """Read stderr separately so player-join/error lines on stderr aren't lost."""
+        if self._process is None or not hasattr(self._process, "stderr") or self._process.stderr is None:
+            return
+        loop = asyncio.get_event_loop()
+        try:
+            while self.is_running:
+                line = await loop.run_in_executor(None, self._process.stderr.readline)
+                if not line:
+                    break
+                self._emit(line.rstrip())
+        except Exception:
+            pass
 
     async def stop(self) -> tuple[bool, str]:
         if not self.is_running:
