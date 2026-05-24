@@ -162,7 +162,7 @@ class ServerManager:
             "+server.port",       str(config.get("server_port", 28015)),
             "+server.queryport",  str(config.get("query_port", 28017)),
             "+server.maxplayers", str(config.get("max_players", 100)),
-            "+server.hostname",   str(config.get("server_name", "Rust Server")),
+            "+server.hostname",   str(config.get("server_name", "")).strip() or "Rust Server",
             "+server.description",str(config.get("server_description", "")),
             "+server.identity",   str(config.get("server_identity", "rust_server")),
             "+server.saveinterval",str(config.get("save_interval", 600)),
