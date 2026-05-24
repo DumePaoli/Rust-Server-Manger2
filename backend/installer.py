@@ -102,7 +102,17 @@ def _download_steamcmd_thread(install_dir: str) -> None:
     _progress = InstallProgress()
     _progress.status = "downloading"
 
-    Path(install_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(install_dir).mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        _progress.error = (
+            f"Accès refusé au dossier '{install_dir}' — "
+            "relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.status = "error"
+        _progress.log(_progress.error)
+        return
 
     if sys.platform == "win32":
         url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
@@ -147,6 +157,14 @@ def _download_steamcmd_thread(install_dir: str) -> None:
             _progress.error = "Exécutable SteamCMD introuvable après extraction."
             _progress.log(_progress.error)
 
+    except PermissionError as exc:
+        msg = (
+            f"Accès refusé — relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.error = msg
+        _progress.status = "error"
+        _progress.log(f"Erreur : {msg}")
     except Exception as exc:
         _progress.error = str(exc)
         _progress.status = "error"
@@ -216,14 +234,22 @@ def _run_steamcmd(steamcmd_path: str, args: list) -> int:
     tail_thread = threading.Thread(target=_tail_log_file, args=(log_path, stop_tail), daemon=True)
     tail_thread.start()
 
-    proc = subprocess.Popen(
-        [steamcmd_path] + args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        bufsize=0,
-        **( {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {} ),
-    )
+    try:
+        proc = subprocess.Popen(
+            [steamcmd_path] + args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            bufsize=0,
+            **( {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {} ),
+        )
+    except PermissionError:
+        stop_tail.set()
+        tail_thread.join(timeout=2)
+        raise PermissionError(
+            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
     buf = b""
     while True:
         chunk = proc.stdout.read(4096)
@@ -252,7 +278,17 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     _progress = InstallProgress()
     _progress.status = "installing"
 
-    Path(server_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(server_dir).mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        _progress.error = (
+            f"Accès refusé au dossier '{server_dir}' — "
+            "relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.status = "error"
+        _progress.log(_progress.error)
+        return
 
     _progress.log(f"SteamCMD : {steamcmd_path}")
     _progress.log(f"Dossier serveur : {server_dir}")
@@ -307,6 +343,16 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
             _progress.error = f"SteamCMD a retourné le code {ret} — vérifiez votre connexion et que les ports UDP 27015-27030 sont ouverts."
             _progress.log(_progress.error)
 
+    except PermissionError as exc:
+        msg = str(exc)
+        if "Administrateur" not in msg:
+            msg = (
+                "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+                "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+            )
+        _progress.error = msg
+        _progress.status = "error"
+        _progress.log(f"Erreur : {msg}")
     except Exception as exc:
         _progress.error = str(exc)
         _progress.status = "error"
