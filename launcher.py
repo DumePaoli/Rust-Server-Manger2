@@ -85,9 +85,11 @@ def _retry_pending_update() -> bool:
     if not (getattr(sys, "frozen", False) and sys.platform == "win32"):
         return False
     current_exe = Path(sys.executable)
-    update_file = Path(str(current_exe) + ".update")
+    install_dir = current_exe.parent
+    update_exe  = Path(str(current_exe) + ".update")
+    update_zip  = install_dir / "_rsm_update.zip"
     ps1_file    = Path(str(current_exe) + "_update.ps1")
-    if not (update_file.exists() and ps1_file.exists()):
+    if not ((update_exe.exists() or update_zip.exists()) and ps1_file.exists()):
         return False
     try:
         ps_content = ps1_file.read_text(encoding="utf-8")

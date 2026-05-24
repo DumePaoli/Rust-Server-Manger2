@@ -92,6 +92,10 @@ class UpdateChecker:
 
     @staticmethod
     def _find_exe_asset(assets: list) -> Optional[str]:
+        # Prefer ZIP (onedir build — robust, no Temp extraction) over EXE (onefile legacy)
+        for asset in assets:
+            if asset.get("name", "").lower().endswith(".zip"):
+                return asset["browser_download_url"]
         for asset in assets:
             if asset.get("name", "").lower().endswith(".exe"):
                 return asset["browser_download_url"]
@@ -123,7 +127,8 @@ def get_download_progress() -> dict:
 
 
 def apply_update(download_url: str) -> tuple[bool, str]:
-    """Download the new .exe and schedule self-replacement via PowerShell (Windows only)."""
+    """Download the new release (ZIP=onedir preferred, EXE=legacy onefile fallback)
+    and schedule self-replacement via PowerShell (Windows only)."""
     global _progress
     _progress = DownloadProgress()
 
@@ -137,7 +142,14 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, "La mise à jour automatique est supportée sur Windows uniquement."
 
     current_exe = Path(sys.executable)
-    tmp_exe = Path(str(current_exe) + ".update")
+    install_dir = current_exe.parent
+    is_zip = download_url.lower().endswith(".zip")
+
+    if is_zip:
+        tmp_file = install_dir / "_rsm_update.zip"
+    else:
+        tmp_file = Path(str(current_exe) + ".update")
+
     pid = os.getpid()
 
     try:
@@ -158,7 +170,7 @@ def apply_update(download_url: str) -> tuple[bool, str]:
                         f.write(chunk)
                         count += 1
                         hook(count, block, total)
-        _retrieve(download_url, str(tmp_exe), _progress.hook)
+        _retrieve(download_url, str(tmp_file), _progress.hook)
         _progress.percent = 100
     except Exception as exc:
         _progress.error = str(exc)
@@ -180,11 +192,13 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n'
         if mei_path else ""
     )
-    ps = (
-        f'$tmpExe  = "{tmp_exe}"\n'
+
+    # Common preamble: kill parent process, wait, then wait for source file unlock
+    preamble = (
+        f'$tmpFile = "{tmp_file}"\n'
         f'$curExe  = "{current_exe}"\n'
+        f'$instDir = "{install_dir}"\n'
         f'$ps1Path = "{ps_path}"\n'
-        # 1. Kill old process and wait (up to 20 s)
         "Start-Sleep -Seconds 1\n"
         f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
         f"$t = [DateTime]::Now.AddSeconds(20)\n"
@@ -192,37 +206,63 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         f"    if (-not (Get-Process -Id {pid} -ErrorAction SilentlyContinue)) {{ break }}\n"
         "    Start-Sleep -Milliseconds 500\n"
         "}\n"
-        # 2. Extra pause for Windows to release file handles
         "Start-Sleep -Seconds 3\n"
-        + mei_line
-        # 3. Wait until the update file is no longer locked by AV (up to 3 min)
-        + "$unlocked = $false\n"
+        + mei_line +
+        "$unlocked = $false\n"
         "$avWait = 180\n"
         "while ($avWait -gt 0 -and -not $unlocked) {\n"
         "  try {\n"
-        "    $s = [IO.File]::Open($tmpExe, 'Open', 'ReadWrite', 'None')\n"
+        "    $s = [IO.File]::Open($tmpFile, 'Open', 'ReadWrite', 'None')\n"
         "    $s.Close(); $s.Dispose()\n"
         "    $unlocked = $true\n"
         "  } catch { Start-Sleep -Seconds 1; $avWait-- }\n"
         "}\n"
-        # 4. Replace exe
-        "if ($unlocked) {\n"
-        "  $moved = $false\n"
-        "  $retries = 30\n"
-        "  while ($retries -gt 0 -and -not $moved) {\n"
-        "    try {\n"
-        "      Move-Item -Force $tmpExe $curExe\n"
-        "      $moved = $true\n"
-        "    } catch { Start-Sleep -Seconds 1; $retries-- }\n"
-        "  }\n"
-        "  if (-not $moved) { Remove-Item $tmpExe -Force -ErrorAction SilentlyContinue }\n"
-        "}\n"
-        # 5. Launch updated exe
+    )
+
+    cleanup = (
         "Start-Process $curExe\n"
-        # 6. Self-cleanup via detached cmd (avoids PowerShell holding its own file lock)
         "Start-Process cmd -WindowStyle Hidden "
         "-ArgumentList \"/c timeout /t 3 /nobreak >nul 2>&1 && del /f /q `\"$ps1Path`\"\"\n"
     )
+
+    if is_zip:
+        # ZIP (onedir): extract over install dir, replacing all files
+        body = (
+            "if ($unlocked) {\n"
+            "  $staging = Join-Path $env:TEMP \"rsm_upd_$([Guid]::NewGuid().ToString('N'))\"\n"
+            "  New-Item -ItemType Directory -Path $staging -Force | Out-Null\n"
+            "  try {\n"
+            "    Expand-Archive -Path $tmpFile -DestinationPath $staging -Force\n"
+            # Copy contents to install dir, retry on locked files (up to 60 s)
+            "    $retries = 60\n"
+            "    while ($retries -gt 0) {\n"
+            "      try {\n"
+            "        Copy-Item -Path (Join-Path $staging '*') -Destination $instDir -Recurse -Force\n"
+            "        break\n"
+            "      } catch { Start-Sleep -Seconds 1; $retries-- }\n"
+            "    }\n"
+            "  } catch {}\n"
+            "  Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue\n"
+            "  Remove-Item -Force $tmpFile -ErrorAction SilentlyContinue\n"
+            "}\n"
+        )
+    else:
+        # EXE (legacy onefile): single-file move
+        body = (
+            "if ($unlocked) {\n"
+            "  $moved = $false\n"
+            "  $retries = 30\n"
+            "  while ($retries -gt 0 -and -not $moved) {\n"
+            "    try {\n"
+            "      Move-Item -Force $tmpFile $curExe\n"
+            "      $moved = $true\n"
+            "    } catch { Start-Sleep -Seconds 1; $retries-- }\n"
+            "  }\n"
+            "  if (-not $moved) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }\n"
+            "}\n"
+        )
+
+    ps = preamble + body + cleanup
 
     try:
         ps_path.write_text(ps, encoding="utf-8")
