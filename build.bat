@@ -47,10 +47,10 @@ pip install -r backend/requirements.txt -q
 pip install pywebview pyinstaller -q
 echo       Done.
 
-REM 3. Package with PyInstaller
-echo [3/3] Packaging .exe...
+REM 3. Package with PyInstaller (--onedir = no _MEIPASS temp extraction)
+echo [3/3] Packaging app...
 pyinstaller ^
-  --onefile ^
+  --onedir ^
   --windowed ^
   --name "RustServerManager" ^
   --add-data "backend;backend" ^
@@ -80,10 +80,14 @@ pyinstaller ^
   --collect-all webview ^
   launcher.py
 
+echo Packaging ZIP for distribution...
+powershell -Command "Compress-Archive -Path dist\RustServerManager\* -DestinationPath dist\RustServerManager.zip -Force"
+
 echo.
 echo =============================================
 echo  Build complete!
-echo  Fichier: dist\RustServerManager.exe
-echo  Double-cliquez pour lancer le logiciel.
+echo  Dossier: dist\RustServerManager\
+echo  ZIP:     dist\RustServerManager.zip
+echo  Lancez RustServerManager.exe dans le dossier.
 echo =============================================
 pause

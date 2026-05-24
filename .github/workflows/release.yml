@@ -69,12 +69,52 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pywebview pyinstaller
 
-      - name: Build .exe with PyInstaller
+      - name: Build onedir with PyInstaller
+        run: |
+          pyinstaller `
+            --onedir `
+            --windowed `
+            --name "RustServerManager" `
+            --add-data "backend;backend" `
+            --add-data "frontend/dist;frontend/dist" `
+            --hidden-import uvicorn.logging `
+            --hidden-import uvicorn.loops `
+            --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols `
+            --hidden-import uvicorn.protocols.http `
+            --hidden-import uvicorn.protocols.http.auto `
+            --hidden-import uvicorn.protocols.http.h11_impl `
+            --hidden-import uvicorn.protocols.websockets `
+            --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.protocols.websockets.websockets_impl `
+            --hidden-import uvicorn.lifespan `
+            --hidden-import uvicorn.lifespan.on `
+            --hidden-import fastapi `
+            --hidden-import fastapi.middleware.cors `
+            --hidden-import fastapi.staticfiles `
+            --hidden-import fastapi.responses `
+            --hidden-import psutil `
+            --hidden-import aiofiles `
+            --hidden-import websockets `
+            --hidden-import webview `
+            --collect-all uvicorn `
+            --collect-all fastapi `
+            --collect-all webview `
+            launcher.py
+
+      - name: Package onedir as ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/RustServerManager/* -DestinationPath dist/RustServerManager.zip -Force
+
+      - name: Build legacy onefile (transition for old auto-updater)
         run: |
           pyinstaller `
             --onefile `
             --windowed `
             --name "RustServerManager" `
+            --distpath dist_onefile `
+            --workpath build_onefile `
             --add-data "backend;backend" `
             --add-data "frontend/dist;frontend/dist" `
             --hidden-import uvicorn.logging `
@@ -108,6 +148,8 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: "Rust Server Manager ${{ steps.meta.outputs.tag }}"
           body: ${{ steps.meta.outputs.changelog }}
-          files: dist/RustServerManager.exe
+          files: |
+            dist/RustServerManager.zip
+            dist_onefile/RustServerManager.exe
           draft: false
           prerelease: false
