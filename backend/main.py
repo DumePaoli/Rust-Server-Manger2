@@ -73,7 +73,13 @@ class _ManagerProxy:
     async def send_command(self, cmd):
         m = registry.get_active_manager()
         if m:
-            await m.send_command(cmd)
+            await m.send_command(cmd)  # logs > cmd to console (visual feedback)
+        # Route through RCON — stdin is not piped so this is the only real path
+        if rcon_client._connected:
+            try:
+                await rcon_client.send_command(cmd, timeout=5.0)
+            except Exception:
+                pass
 
     def get_status(self):
         m = registry.get_active_manager()

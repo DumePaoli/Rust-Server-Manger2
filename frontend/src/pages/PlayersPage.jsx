@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import {
-  Users, Search, Shield, LogOut, VolumeX, RefreshCw, MessageSquare, X, Check,
+  Users, Search, Shield, LogOut, VolumeX, RefreshCw, MessageSquare, X, Check, Copy,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -83,6 +83,30 @@ function ActionModal({ player, action, onConfirm, onClose }) {
   );
 }
 
+function CopySteamId({ steamid }) {
+  const [copied, setCopied] = useState(false);
+  const copy = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(steamid).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      onClick={copy}
+      title="Copier le SteamID"
+      className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-300 font-mono transition-colors group/copy"
+    >
+      <span>{steamid}</span>
+      {copied
+        ? <Check size={10} className="text-green-400" />
+        : <Copy size={10} className="opacity-0 group-hover/copy:opacity-100 transition-opacity" />
+      }
+    </button>
+  );
+}
+
 function PlayerRow({ player, onAction }) {
   return (
     <div className="flex items-center gap-4 px-4 py-3 rounded-xl bg-surface-700 border border-surface-600 hover:border-surface-500 transition-colors group">
@@ -94,7 +118,7 @@ function PlayerRow({ player, onAction }) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="text-sm font-medium text-gray-200 truncate">{player.name}</div>
-        <div className="text-xs text-gray-600 font-mono">{player.steamid}</div>
+        <CopySteamId steamid={player.steamid} />
       </div>
 
       {/* Stats */}
