@@ -75,6 +75,12 @@ class _ManagerProxy:
         if m:
             await m.send_command(cmd)  # logs > cmd to console (visual feedback)
         # Route through RCON — stdin is not piped so this is the only real path
+        # Auto-reconnect if credentials stored but connection dropped
+        if not rcon_client._connected and rcon_client._host and rcon_client._password:
+            try:
+                await rcon_client.connect(rcon_client._host, rcon_client._port, rcon_client._password)
+            except Exception:
+                pass
         if rcon_client._connected:
             try:
                 await rcon_client.send_command(cmd, timeout=5.0)
@@ -423,7 +429,9 @@ async def mute_player(steamid: str):
 @app.post("/api/players/{steamid}/message")
 async def message_player(steamid: str, body: PlayerActionBody):
     if body.reason:
-        await manager.send_command(f"say {body.reason}")
+        # Carbon supports `pm <steamid> <message>` for private messages
+        msg = body.reason.replace('"', '\\"')
+        await manager.send_command(f'pm {steamid} "{msg}"')
     return {"success": True}
 
 

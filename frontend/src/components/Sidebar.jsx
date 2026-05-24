@@ -4,7 +4,7 @@ import axios from "axios";
 import {
   LayoutDashboard, Settings, Terminal, Package, Users,
   Trash2, MessageSquare, Clock, Download, SlidersHorizontal,
-  ArrowUpCircle, Radio, Archive, ShieldOff, Shield, MessageCircle,
+  ArrowUpCircle, Radio, Archive, ShieldOff, MessageCircle,
   Server, ChevronDown, Check, UserCheck,
 } from "lucide-react";
 import { useSettings } from "../contexts/SettingsContext";
@@ -19,7 +19,6 @@ const NAV = [
   { to: "/bans", icon: ShieldOff, label: "Bannissements" },
   { to: "/whitelist", icon: UserCheck, label: "Whitelist" },
   { to: "/plugins", icon: Package, label: "Plugins" },
-  { to: "/oxide", icon: Shield, label: "Oxide Perms" },
   { to: "/wipe", icon: Trash2, label: "Wipe Manager" },
   { to: "/settings", icon: Settings, label: "Server Settings" },
   { divider: true },

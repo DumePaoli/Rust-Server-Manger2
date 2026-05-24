@@ -131,15 +131,29 @@ def install_framework(config: dict, name: str) -> tuple[bool, str]:
 
 
 def _get_plugins_dir(config: dict) -> Optional[str]:
+    # Priority: server_data_path first (legacy), then server executable dir (Carbon/Oxide default)
+    candidates = []
+
     data_path = config.get("server_data_path", "").strip()
-    if not data_path:
-        return None
-    for sub in ["oxide/plugins", "Oxide/plugins", "carbon/plugins", "Carbon/plugins"]:
-        p = os.path.join(data_path, sub)
+    if data_path and os.path.isdir(data_path):
+        for sub in ["carbon/plugins", "Carbon/plugins", "oxide/plugins", "Oxide/plugins"]:
+            candidates.append(os.path.join(data_path, sub))
+
+    server_dir = _get_server_dir(config)
+    if server_dir:
+        for sub in ["carbon/plugins", "Carbon/plugins", "oxide/plugins", "Oxide/plugins"]:
+            candidates.append(os.path.join(server_dir, sub))
+
+    for p in candidates:
         if os.path.isdir(p):
             return p
-    # Directory might not exist yet — return expected path so we can show instructions
-    return os.path.join(data_path, "oxide/plugins")
+
+    # Not found yet — return best guess so caller can show instructions
+    if server_dir:
+        return os.path.join(server_dir, "carbon/plugins")
+    if data_path:
+        return os.path.join(data_path, "carbon/plugins")
+    return None
 
 
 def _read_plugin_version(path: str) -> str:
