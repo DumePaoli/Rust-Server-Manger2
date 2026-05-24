@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import base64
 import ssl
 import urllib.request
 import urllib.error
@@ -163,56 +164,116 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         _progress.error = str(exc)
         return False, f"Échec du téléchargement : {exc}"
 
-    # PowerShell script runs fully detached and windowless.
-    # It kills this process by PID — more reliable than relying on the process to exit
-    # on its own. The previous signal-file approach failed because webview.destroy() from
-    # a background thread doesn't reliably unblock webview.start() on Windows, and
-    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
-    # external TerminateProcess() call that bypasses all of that.
+    # Build the PowerShell update script.
+    # Key design choices:
+    #  - Launched via ShellExecuteW (not Popen) so it runs OUTSIDE PyInstaller's
+    #    Windows Job Object; Popen children are killed when the job closes on parent exit.
+    #  - Passed as base64 -EncodedCommand to bypass file-level execution policy.
+    #  - Waits for the source file to be fully unlocked (AV scanners can hold the
+    #    .exe.update for 1-3 min) before attempting Move-Item.
+    #  - Self-cleanup via a detached cmd so PowerShell doesn't hold a lock on its
+    #    own script file.
     mei_path = getattr(sys, "_MEIPASS", "")
     ps_path = Path(str(current_exe) + "_update.ps1")
+
+    mei_line = (
+        f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n'
+        if mei_path else ""
+    )
     ps = (
-        # 1. Kill the old process and wait until it's truly gone (up to 15 s)
+        f'$tmpExe  = "{tmp_exe}"\n'
+        f'$curExe  = "{current_exe}"\n'
+        f'$ps1Path = "{ps_path}"\n'
+        # 1. Kill old process and wait (up to 20 s)
         "Start-Sleep -Seconds 1\n"
         f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
-        f"$deadline = [DateTime]::Now.AddSeconds(15)\n"
-        f"while ([DateTime]::Now -lt $deadline) {{\n"
+        f"$t = [DateTime]::Now.AddSeconds(20)\n"
+        f"while ([DateTime]::Now -lt $t) {{\n"
         f"    if (-not (Get-Process -Id {pid} -ErrorAction SilentlyContinue)) {{ break }}\n"
         "    Start-Sleep -Milliseconds 500\n"
         "}\n"
-        # 2. Extra buffer for Windows to release file handles
-        "Start-Sleep -Seconds 2\n"
-        + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
-        # 3. Replace exe — retry for up to 60 s (AV scanners can hold the file)
-        + "$retries = 60\n"
-        "while ($retries -gt 0) {\n"
+        # 2. Extra pause for Windows to release file handles
+        "Start-Sleep -Seconds 3\n"
+        + mei_line
+        # 3. Wait until the update file is no longer locked by AV (up to 3 min)
+        + "$unlocked = $false\n"
+        "$avWait = 180\n"
+        "while ($avWait -gt 0 -and -not $unlocked) {\n"
         "  try {\n"
-        f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
-        "    break\n"
-        "  } catch {\n"
-        "    Start-Sleep -Seconds 1\n"
-        "    $retries--\n"
-        "  }\n"
+        "    $s = [IO.File]::Open($tmpExe, 'Open', 'ReadWrite', 'None')\n"
+        "    $s.Close(); $s.Dispose()\n"
+        "    $unlocked = $true\n"
+        "  } catch { Start-Sleep -Seconds 1; $avWait-- }\n"
         "}\n"
-        f'Start-Process "{current_exe}"\n'
-        "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
+        # 4. Replace exe
+        "if ($unlocked) {\n"
+        "  $moved = $false\n"
+        "  $retries = 30\n"
+        "  while ($retries -gt 0 -and -not $moved) {\n"
+        "    try {\n"
+        "      Move-Item -Force $tmpExe $curExe\n"
+        "      $moved = $true\n"
+        "    } catch { Start-Sleep -Seconds 1; $retries-- }\n"
+        "  }\n"
+        "  if (-not $moved) { Remove-Item $tmpExe -Force -ErrorAction SilentlyContinue }\n"
+        "}\n"
+        # 5. Launch updated exe
+        "Start-Process $curExe\n"
+        # 6. Self-cleanup via detached cmd (avoids PowerShell holding its own file lock)
+        "Start-Process cmd -WindowStyle Hidden "
+        "-ArgumentList \"/c timeout /t 3 /nobreak >nul 2>&1 && del /f /q `\"$ps1Path`\"\"\n"
     )
 
     try:
         ps_path.write_text(ps, encoding="utf-8")
-        subprocess.Popen(
-            [
-                "powershell",
-                "-WindowStyle", "Hidden",
-                "-NonInteractive",
-                "-ExecutionPolicy", "Bypass",
-                "-File", str(ps_path),
-            ],
-            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
-        )
     except Exception as exc:
         _progress.error = str(exc)
-        return False, f"Échec du script de remplacement : {exc}"
+        return False, f"Impossible d'écrire le script de mise à jour : {exc}"
+
+    # Encode as UTF-16LE for -EncodedCommand
+    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    ps_args = (
+        f"-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass "
+        f"-EncodedCommand {encoded}"
+    )
+
+    launched = False
+    # Attempt 1: ShellExecuteW — creates process outside PyInstaller's Job Object
+    try:
+        import ctypes
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, "open", "powershell.exe", ps_args, None, 0,
+        )
+        launched = int(ret) > 32
+    except Exception:
+        pass
+
+    if not launched:
+        # Attempt 2: Popen with CREATE_BREAKAWAY_FROM_JOB
+        try:
+            subprocess.Popen(
+                ["powershell", "-NonInteractive", "-WindowStyle", "Hidden",
+                 "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                creationflags=0x01000000 | 0x08000000 | 0x00000008,  # BREAKAWAY|NO_WIN|DETACHED
+                close_fds=True,
+            )
+            launched = True
+        except OSError:
+            pass
+
+    if not launched:
+        # Attempt 3: plain Popen (best-effort if job object allows child survival)
+        try:
+            subprocess.Popen(
+                ["powershell", "-NonInteractive", "-WindowStyle", "Hidden",
+                 "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+                creationflags=0x08000000 | 0x00000008,  # NO_WIN|DETACHED
+                close_fds=True,
+            )
+            launched = True
+        except Exception as exc:
+            _progress.error = str(exc)
+            return False, f"Échec du lancement du script de remplacement : {exc}"
 
     _progress.done = True
     # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
