@@ -125,15 +125,67 @@ class ServerManager:
                 cwd=str(Path(executable).parent),
             )
             if sys.platform == "win32":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                kwargs["creationflags"] = (
+                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0  # SW_HIDE
+                kwargs["startupinfo"] = si
             self._process = subprocess.Popen(cmd, **kwargs)
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
+            if sys.platform == "win32":
+                self._spawn_window_hider(self._process.pid)
             self._read_task = asyncio.create_task(self._read_output())
             return True, f"Server started (PID {self._process.pid})"
         except Exception as e:
             return False, str(e)
+
+    def _spawn_window_hider(self, pid: int) -> None:
+        """Hide all top-level windows owned by the child PID (Unity allocates
+        a console after spawn that CREATE_NO_WINDOW cannot prevent)."""
+        import threading
+
+        def worker():
+            import time
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            EnumWindows = user32.EnumWindows
+            GetWindowThreadProcessId = user32.GetWindowThreadProcessId
+            ShowWindow = user32.ShowWindow
+            IsWindowVisible = user32.IsWindowVisible
+
+            EnumWindowsProc = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
+            )
+
+            def hide_pid_windows() -> int:
+                hidden = [0]
+
+                def cb(hwnd, _):
+                    owner_pid = wintypes.DWORD()
+                    GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+                    if owner_pid.value == pid and IsWindowVisible(hwnd):
+                        ShowWindow(hwnd, 0)  # SW_HIDE
+                        hidden[0] += 1
+                    return True
+
+                EnumWindows(EnumWindowsProc(cb), 0)
+                return hidden[0]
+
+            # Retry over 10s — Unity console may appear late.
+            for _ in range(20):
+                if self._process is None or self._process.poll() is not None:
+                    return
+                hide_pid_windows()
+                time.sleep(0.5)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
     def _build_command(self, executable: str, config: dict) -> list[str]:
         cmd = [
