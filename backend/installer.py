@@ -102,7 +102,17 @@ def _download_steamcmd_thread(install_dir: str) -> None:
     _progress = InstallProgress()
     _progress.status = "downloading"
 
-    Path(install_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(install_dir).mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        _progress.error = (
+            f"Accès refusé au dossier '{install_dir}' — "
+            "relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.status = "error"
+        _progress.log(_progress.error)
+        return
 
     if sys.platform == "win32":
         url = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip"
@@ -147,6 +157,14 @@ def _download_steamcmd_thread(install_dir: str) -> None:
             _progress.error = "Exécutable SteamCMD introuvable après extraction."
             _progress.log(_progress.error)
 
+    except PermissionError:
+        msg = (
+            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.error = msg
+        _progress.status = "error"
+        _progress.log(f"Erreur : {msg}")
     except Exception as exc:
         _progress.error = str(exc)
         _progress.status = "error"
@@ -163,7 +181,17 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     _progress = InstallProgress()
     _progress.status = "installing"
 
-    Path(server_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        Path(server_dir).mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        _progress.error = (
+            f"Accès refusé au dossier '{server_dir}' — "
+            "relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.status = "error"
+        _progress.log(_progress.error)
+        return
 
     _progress.log(f"SteamCMD : {steamcmd_path}")
     _progress.log(f"Dossier serveur : {server_dir}")
@@ -180,15 +208,18 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
     ]
 
     try:
-        proc = subprocess.Popen(
-            cmd,
+        kwargs = dict(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
             text=True,
             bufsize=1,
             encoding="utf-8",
             errors="replace",
         )
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        proc = subprocess.Popen(cmd, **kwargs)
 
         for line in proc.stdout:
             line = line.rstrip()
@@ -227,6 +258,14 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
             _progress.error = f"SteamCMD a retourné le code {proc.returncode}"
             _progress.log(_progress.error)
 
+    except PermissionError as exc:
+        msg = (
+            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+        )
+        _progress.error = msg
+        _progress.status = "error"
+        _progress.log(f"Erreur : {msg}")
     except Exception as exc:
         _progress.error = str(exc)
         _progress.status = "error"
