@@ -172,11 +172,19 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     mei_path = getattr(sys, "_MEIPASS", "")
     ps_path = Path(str(current_exe) + "_update.ps1")
     ps = (
+        # 1. Kill the old process and wait until it's truly gone (up to 15 s)
         "Start-Sleep -Seconds 1\n"
         f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
+        f"$deadline = [DateTime]::Now.AddSeconds(15)\n"
+        f"while ([DateTime]::Now -lt $deadline) {{\n"
+        f"    if (-not (Get-Process -Id {pid} -ErrorAction SilentlyContinue)) {{ break }}\n"
+        "    Start-Sleep -Milliseconds 500\n"
+        "}\n"
+        # 2. Extra buffer for Windows to release file handles
         "Start-Sleep -Seconds 2\n"
         + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
-        + "$retries = 20\n"
+        # 3. Replace exe — retry for up to 60 s (AV scanners can hold the file)
+        + "$retries = 60\n"
         "while ($retries -gt 0) {\n"
         "  try {\n"
         f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
@@ -187,7 +195,7 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         "  }\n"
         "}\n"
         f'Start-Process "{current_exe}"\n'
-        "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
+        "Remove-Item $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyContinue\n"
     )
 
     try:
