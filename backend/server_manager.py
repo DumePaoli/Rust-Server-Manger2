@@ -16,6 +16,7 @@ from players import PlayerManager
 @dataclass
 class ServerStatus:
     running: bool = False
+    server_ready: bool = False
     pid: Optional[int] = None
     uptime_seconds: int = 0
     cpu_percent: float = 0.0
@@ -35,6 +36,7 @@ class ServerManager:
         self._read_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
         self._last_raw: str = ""          # dedup: skip consecutive identical lines
+        self._server_ready: bool = False
         self.players = PlayerManager()
         # Auto-restart state
         self._config: Optional[dict] = None
@@ -54,11 +56,23 @@ class ServerManager:
         if cb in self._log_callbacks:
             self._log_callbacks.remove(cb)
 
+    # Patterns that signal the server is fully up and accepting connections
+    _READY_PATTERNS = (
+        "server startup complete",
+        "steamserver connected",
+        "server initialized",
+    )
+
     def _emit(self, line: str) -> None:
         # Skip consecutive identical lines — stdout+stderr can carry same content
         if line and line == self._last_raw:
             return
         self._last_raw = line
+        # Detect server-ready state from log
+        if not self._server_ready:
+            lower = line.lower()
+            if any(p in lower for p in self._READY_PATTERNS):
+                self._server_ready = True
         timestamp = datetime.now().strftime("%H:%M:%S")
         entry = f"[{timestamp}] {line}"
         self._console_log.append(entry)
@@ -84,7 +98,7 @@ class ServerManager:
             last_crash_at=self._last_crash_at,
         )
         if not self.is_running or self._process is None:
-            return ServerStatus(running=False, **base)
+            return ServerStatus(running=False, server_ready=False, **base)
         try:
             proc = psutil.Process(self._process.pid)
             mem = proc.memory_info().rss / (1024 * 1024)
@@ -92,6 +106,7 @@ class ServerManager:
             uptime = int((datetime.now() - self._started_at).total_seconds()) if self._started_at else 0
             return ServerStatus(
                 running=True,
+                server_ready=self._server_ready,
                 pid=self._process.pid,
                 uptime_seconds=uptime,
                 cpu_percent=cpu,
@@ -100,7 +115,7 @@ class ServerManager:
                 **base,
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return ServerStatus(running=False, **base)
+            return ServerStatus(running=False, server_ready=False, **base)
 
     def get_console_log(self) -> list[str]:
         return self._console_log.copy()
@@ -140,7 +155,8 @@ class ServerManager:
                 popen_kwargs["startupinfo"] = si
             self._process = subprocess.Popen(cmd, **popen_kwargs)
             self._started_at = datetime.now()
-            self._last_raw = ""  # reset dedup state on new process
+            self._last_raw = ""        # reset dedup state on new process
+            self._server_ready = False # reset ready flag for new process
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
             self._read_task = asyncio.create_task(self._read_output())
@@ -258,6 +274,7 @@ class ServerManager:
                 self._emit("Server stopped gracefully.")
             self._process = None
             self._started_at = None
+            self._server_ready = False
             self.players.clear()
             return True, "Server stopped."
         except Exception as e:
