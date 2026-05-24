@@ -267,30 +267,20 @@ oFS.DeleteFile WScript.ScriptFullName, True
     _progress.done = True
     # Give the frontend time to read progress.done.
     time.sleep(3)
-    # Kill any WebView2 / Edge child processes so they release DLL handles
-    # inside _MEIPASS before the temp dir gets removed.
-    try:
-        import psutil
-        me = psutil.Process()
-        for child in me.children(recursive=True):
-            try:
-                child.kill()
-            except Exception:
-                pass
-    except Exception:
-        pass
-    # Hard-terminate the process so the PyInstaller bootloader skips its
-    # _MEIPASS cleanup step (which pops the "Failed to remove temporary
-    # directory" warning when WebView2 still holds DLLs). The VBScript
-    # cleans the temp dir asynchronously with retries.
+    # Hard-terminate this process so PyInstaller's --onefile bootloader
+    # skips its _MEIPASS cleanup step (which can pop a "Failed to remove
+    # temporary directory" warning when WebView2 still holds DLLs). The
+    # VBScript cleans the temp dir asynchronously with retries.
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.kernel32.TerminateProcess(
-                ctypes.windll.kernel32.GetCurrentProcess(), 0
-            )
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+            kernel32.GetCurrentProcess.argtypes = []
+            kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            kernel32.TerminateProcess.restype = ctypes.c_int
+            kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
         except Exception:
-            os._exit(0)
-    else:
-        os._exit(0)
+            pass
+    os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."
