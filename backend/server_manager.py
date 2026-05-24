@@ -2,6 +2,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -114,15 +115,23 @@ class ServerManager:
         if not Path(executable).exists():
             return False, f"Executable not found: {executable}"
 
+        server_dir = str(Path(executable).parent)
         cmd = self._build_command(executable, config)
         try:
-            self._process = subprocess.Popen(
-                cmd,
+            popen_kwargs: dict = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                cwd=server_dir,
             )
+            if sys.platform == "win32":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0
+                popen_kwargs["startupinfo"] = si
+            self._process = subprocess.Popen(cmd, **popen_kwargs)
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
@@ -146,7 +155,7 @@ class ServerManager:
             f"+rcon.password {config.get('rcon_password', 'changeme')}",
             f"+rcon.web 1",
             "-nographics",
-            "-logFile server_output.log",
+            f"-logFile \"{Path(executable).parent / 'server_output.log'}\"",
         ]
         custom_map = config.get("custom_map_url", "")
         if custom_map:
