@@ -152,11 +152,12 @@ class ServerManager:
     def _build_command(self, executable: str, config: dict) -> list[str]:
         # Each +cmd and its value must be SEPARATE list items so subprocess
         # passes them as distinct argv tokens — Rust parses argv not a shell string.
-        log_file = str(Path(executable).parent / "server_output.log")
+        # Use -logFile - to send Unity log to stdout so we can capture it via pipe.
         cmd = [
             executable,
             "-batchmode",
             "-nographics",
+            "-logFile",           "-",
             "+server.ip",         str(config.get("server_ip", "0.0.0.0")),
             "+server.port",       str(config.get("server_port", 28015)),
             "+server.queryport",  str(config.get("query_port", 28017)),
@@ -168,7 +169,6 @@ class ServerManager:
             "+rcon.port",         str(config.get("rcon_port", 28016)),
             "+rcon.password",     str(config.get("rcon_password", "changeme")),
             "+rcon.web",          "1",
-            "-logFile",           log_file,
         ]
         custom_map = config.get("custom_map_url", "")
         if custom_map:
