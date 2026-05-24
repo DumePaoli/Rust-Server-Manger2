@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import {
   Download, CheckCircle2, Circle, AlertCircle, RefreshCw,
-  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder, ShieldCheck, Shield,
+  Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder,
+  ShieldCheck, Loader2, XCircle,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -65,6 +66,126 @@ function ProgressBar({ percent, status }) {
   );
 }
 
+function PrerequisitesCard() {
+  const [prereqs, setPrereqs] = useState(null);
+  const [loadErr, setLoadErr] = useState(false);
+  const [progress, setProgress] = useState({});
+  const pollRef = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BASE}/api/prerequisites`);
+      setPrereqs(data);
+      setLoadErr(false);
+    } catch {
+      setLoadErr(true);
+    }
+  }, []);
+
+  const pollProgress = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const { data } = await axios.get(`${BASE}/api/prerequisites/progress`);
+        setProgress(data);
+        const allDone = Object.values(data).every(p => p.status === "done" || p.status === "error");
+        if (allDone && Object.keys(data).length > 0) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          load(); // refresh installed status
+        }
+      } catch {}
+    }, 1000);
+  }, [load]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const handleInstall = async (pid) => {
+    try {
+      await axios.post(`${BASE}/api/prerequisites/${pid}/install`);
+      pollProgress();
+    } catch {}
+  };
+
+  if (loadErr) return (
+    <div className="card flex items-center gap-2 text-xs text-yellow-400">
+      <AlertCircle size={13} className="shrink-0" />
+      Prérequis non vérifiés (backend indisponible)
+    </div>
+  );
+  if (!prereqs) return (
+    <div className="card flex items-center gap-2 text-xs text-gray-500">
+      <Loader2 size={13} className="animate-spin shrink-0" />
+      Vérification des prérequis…
+    </div>
+  );
+  const allOk = Object.values(prereqs).every(p => p.installed);
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center gap-2">
+        <ShieldCheck size={14} className="text-rust-400" />
+        <span className="text-sm font-medium text-gray-300">Prérequis système</span>
+        {allOk && <span className="text-[10px] font-semibold bg-green-900/30 text-green-400 px-1.5 py-0.5 rounded ml-auto">Tout installé</span>}
+      </div>
+
+      <div className="space-y-2">
+        {Object.entries(prereqs).map(([pid, info]) => {
+          const p = progress[pid];
+          const installing = p && (p.status === "downloading" || p.status === "installing" || p.status === "pending");
+          const installErr = p?.status === "error";
+          const justDone = p?.status === "done";
+
+          return (
+            <div key={pid} className="flex items-center gap-3 py-1.5 px-3 rounded-lg bg-surface-700 border border-surface-600">
+              {info.installed || justDone
+                ? <CheckCircle2 size={14} className="text-green-400 shrink-0" />
+                : installErr
+                ? <XCircle size={14} className="text-red-400 shrink-0" />
+                : installing
+                ? <Loader2 size={14} className="text-rust-400 animate-spin shrink-0" />
+                : <AlertCircle size={14} className="text-yellow-400 shrink-0" />
+              }
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-gray-200">{info.name}</div>
+                <div className="text-[11px] text-gray-500 truncate">
+                  {installing
+                    ? (p.status === "downloading" ? "Téléchargement…" : "Installation…")
+                    : installErr
+                    ? (p.error ?? "Erreur")
+                    : justDone
+                    ? "Installé avec succès"
+                    : info.installed
+                    ? "Installé"
+                    : info.description}
+                </div>
+              </div>
+              {!info.installed && !justDone && info.installable && !installing && (
+                <button
+                  onClick={() => handleInstall(pid)}
+                  className="text-[11px] px-2 py-1 rounded bg-rust-600/20 text-rust-400 hover:bg-rust-600/35 transition-colors shrink-0"
+                >
+                  Installer
+                </button>
+              )}
+              {info.builtin && !info.installed && (
+                <span className="text-[10px] text-gray-600 shrink-0">Intégré Windows</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!allOk && (
+        <p className="text-[11px] text-gray-500">
+          Les prérequis manquants peuvent empêcher le serveur Rust de démarrer.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function InstallerPage() {
   const [step, setStep] = useState(1);
   const [maxReached, setMaxReached] = useState(1);
@@ -75,8 +196,6 @@ export default function InstallerPage() {
   const [serverDir, setServerDir] = useState("C:\\RustServer");
   const [working, setWorking] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
-  const [portsResult, setPortsResult] = useState(null);
-  const [portsWorking, setPortsWorking] = useState(false);
   const logRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -156,21 +275,6 @@ export default function InstallerPage() {
     }
   };
 
-  const handleValidate = async () => {
-    setProgress(null);
-    setWorking(true);
-    goTo(3);
-    try {
-      await axios.post(`${BASE}/api/installer/server/validate`, {
-        steamcmd_path: steamcmdPath,
-        server_dir: serverDir,
-      });
-      startPolling(1500);
-    } catch {
-      setWorking(false);
-    }
-  };
-
   // ── Step 4: Save config ──────────────────────────────────────────────────
 
   const handleSaveConfig = async () => {
@@ -184,21 +288,6 @@ export default function InstallerPage() {
       });
       setConfigSaved(true);
     } catch { /* ignore */ }
-  };
-
-  // ── Open firewall ports ──────────────────────────────────────────────────
-
-  const handleOpenPorts = async () => {
-    setPortsWorking(true);
-    setPortsResult(null);
-    try {
-      const { data } = await axios.post(`${BASE}/api/installer/ports/open`, {});
-      setPortsResult(data);
-    } catch (e) {
-      setPortsResult({ success: false, message: "Erreur réseau", details: [] });
-    } finally {
-      setPortsWorking(false);
-    }
   };
 
   // ── When SteamCMD download finishes ─────────────────────────────────────
@@ -518,14 +607,6 @@ export default function InstallerPage() {
               Rendez-vous dans <strong>Server Settings</strong> pour personnaliser votre serveur, puis démarrez-le depuis le Dashboard.
             </p>
           )}
-          <button
-            className="btn-secondary w-full justify-center"
-            onClick={handleValidate}
-            disabled={!steamcmdPath || !serverDir}
-          >
-            <ShieldCheck size={14} />
-            Vérifier / Réparer les fichiers
-          </button>
         </div>
       </div>
     );
@@ -541,6 +622,9 @@ export default function InstallerPage() {
 
       {/* Step indicator */}
       <StepIndicator current={step} maxReached={maxReached} />
+
+      {/* Prerequisites */}
+      <PrerequisitesCard />
 
       {/* Step card */}
       <div className="card">
@@ -563,60 +647,6 @@ export default function InstallerPage() {
           </p>
         </div>
       )}
-
-      {/* Maintenance card — always visible once steamcmd and serverDir are known */}
-      {steamcmdPath && serverDir && step !== 3 && (
-        <div className="card space-y-3">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={14} className="text-rust-400" />
-            <span className="text-sm font-medium text-gray-300">Maintenance</span>
-          </div>
-          <p className="text-xs text-gray-500">
-            Lance <code className="text-gray-400">app_update 258550 validate</code> pour vérifier et réparer les fichiers du serveur (fichiers manquants, corrompus, etc.).
-          </p>
-          <button
-            className="btn-secondary text-sm w-full justify-center"
-            onClick={handleValidate}
-            disabled={working}
-          >
-            <ShieldCheck size={13} />
-            Vérifier / Réparer les fichiers serveur
-          </button>
-        </div>
-      )}
-
-      {/* Ports card */}
-      <div className="card space-y-3">
-        <div className="flex items-center gap-2">
-          <Shield size={14} className="text-rust-400" />
-          <span className="text-sm font-medium text-gray-300">Pare-feu Windows</span>
-        </div>
-        <p className="text-xs text-gray-500">
-          Ouvre les ports 28015 (jeu), 28016 (RCON) et 28017 (query) dans le pare-feu Windows. Nécessite des droits administrateur.
-        </p>
-        <button
-          className="btn-secondary text-sm w-full justify-center"
-          onClick={handleOpenPorts}
-          disabled={portsWorking}
-        >
-          {portsWorking ? <RefreshCw size={13} className="animate-spin" /> : <Shield size={13} />}
-          {portsWorking ? "Ouverture en cours…" : "Ouvrir les ports dans le pare-feu"}
-        </button>
-        {portsResult && (
-          <div className={`rounded-lg p-3 text-xs space-y-1.5 ${portsResult.success ? "bg-green-900/25 border border-green-800" : "bg-red-900/25 border border-red-800"}`}>
-            <div className={`font-medium ${portsResult.success ? "text-green-300" : "text-red-300"}`}>
-              {portsResult.message}
-            </div>
-            {portsResult.details?.length > 0 && (
-              <div className="font-mono space-y-0.5 text-gray-400">
-                {portsResult.details.map((l, i) => (
-                  <div key={i} className={l.startsWith("OK") ? "text-green-500" : "text-red-400"}>{l}</div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

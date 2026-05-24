@@ -218,7 +218,7 @@ export default function ServersPage() {
               className={`card flex items-center gap-4 transition-colors ${s.active ? "border-rust-700/60 bg-rust-600/5" : ""}`}
             >
               {/* Status dot */}
-              <div className={`w-2 h-2 rounded-full shrink-0 ${s.running && s.server_ready ? "bg-green-400 animate-pulse" : s.running ? "bg-yellow-400 animate-pulse" : "bg-surface-500"}`} />
+              <div className={`w-2 h-2 rounded-full shrink-0 ${s.running ? "bg-green-400 animate-pulse" : "bg-surface-500"}`} />
 
               {/* Info */}
               <div className="flex-1 min-w-0">
@@ -232,11 +232,8 @@ export default function ServersPage() {
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-3">
                   <span>Port {s.port}</span>
-                  <span className={
-                    s.running && s.server_ready ? "text-green-400" :
-                    s.running ? "text-yellow-400" : "text-gray-600"
-                  }>
-                    {s.running && s.server_ready ? "En ligne" : s.running ? "Démarrage..." : "Hors ligne"}
+                  <span className={s.running ? "text-green-400" : "text-gray-600"}>
+                    {s.running ? "En ligne" : "Hors ligne"}
                   </span>
                 </div>
               </div>

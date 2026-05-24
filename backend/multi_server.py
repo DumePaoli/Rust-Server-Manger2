@@ -112,7 +112,6 @@ class ServerRegistry:
                 "name": e.name,
                 "active": e.id == self._active_id,
                 "running": e.manager.is_running,
-                "server_ready": getattr(e.manager, "_server_ready", False),
                 "port": e.config.get("server_port", 28015),
             }
             for e in self._servers.values()

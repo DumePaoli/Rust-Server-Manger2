@@ -3,8 +3,6 @@ import sys
 import json
 import time
 import ssl
-import shutil
-import zipfile
 import urllib.request
 import urllib.error
 import subprocess
@@ -37,9 +35,11 @@ class UpdateChecker:
         self._cache_ts: float = 0
 
     def check(self, force: bool = False) -> dict:
+        """Return update info dict. Uses in-memory cache to avoid hammering the API."""
         now = time.time()
         if not force and self._cache and (now - self._cache_ts) < self.CACHE_TTL:
             return self._cache
+
         result = self._fetch()
         self._cache = result
         self._cache_ts = now
@@ -63,14 +63,12 @@ class UpdateChecker:
                 return self._no_update()
 
             if is_newer(latest_tag, self.current_version):
-                assets = data.get("assets", [])
-                # Prefer .zip (onedir) over .exe (onefile legacy)
-                url = self._find_zip_asset(assets) or self._find_exe_asset(assets)
+                exe_url = self._find_exe_asset(data.get("assets", []))
                 return {
                     "available": True,
                     "latest_version": latest_tag,
                     "current_version": self.current_version,
-                    "download_url": url,
+                    "download_url": exe_url,
                     "changelog": data.get("body") or "",
                     "release_url": data.get("html_url", ""),
                 }
@@ -78,6 +76,7 @@ class UpdateChecker:
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
+                # No releases yet — silent, not an error
                 return self._no_update()
             return {"available": False, "current_version": self.current_version, "error": f"HTTP {e.code}"}
         except Exception as exc:
@@ -94,13 +93,6 @@ class UpdateChecker:
     def _find_exe_asset(assets: list) -> Optional[str]:
         for asset in assets:
             if asset.get("name", "").lower().endswith(".exe"):
-                return asset["browser_download_url"]
-        return None
-
-    @staticmethod
-    def _find_zip_asset(assets: list) -> Optional[str]:
-        for asset in assets:
-            if asset.get("name", "").lower().endswith(".zip"):
                 return asset["browser_download_url"]
         return None
 
@@ -129,38 +121,13 @@ def get_download_progress() -> dict:
     }
 
 
-def _ssl_opener():
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
-
-
-def _download(url: str, dest: Path) -> None:
-    opener = _ssl_opener()
-    with opener.open(url) as src:
-        total = int(src.headers.get("Content-Length", 0))
-        block = 65536
-        count = 0
-        with open(str(dest), "wb") as f:
-            while True:
-                chunk = src.read(block)
-                if not chunk:
-                    break
-                f.write(chunk)
-                count += 1
-                _progress.hook(count, block, total)
-    _progress.percent = 100
-
-
 def apply_update(download_url: str) -> tuple[bool, str]:
-    """Download new release (.zip preferred, .exe legacy) and launch
-    VBScript replacer that swaps files once this process is gone."""
+    """Download the new .exe and schedule self-replacement via PowerShell (Windows only)."""
     global _progress
     _progress = DownloadProgress()
 
     if not getattr(sys, "frozen", False):
-        return False, "La mise à jour automatique nécessite l'application packagée."
+        return False, "La mise à jour automatique nécessite l'application packagée (.exe)."
 
     if not download_url:
         return False, "Aucune URL de téléchargement disponible."
@@ -169,205 +136,79 @@ def apply_update(download_url: str) -> tuple[bool, str]:
         return False, "La mise à jour automatique est supportée sur Windows uniquement."
 
     current_exe = Path(sys.executable)
-    install_dir = current_exe.parent
-    vbs_path = install_dir / (current_exe.stem + "_updater.vbs")
-    log_path = install_dir / (current_exe.stem + "_updater.log")
+    tmp_exe = Path(str(current_exe) + ".update")
     pid = os.getpid()
 
-    is_zip = download_url.lower().endswith(".zip")
-
-    def esc(p) -> str:
-        return str(p).replace('"', '""')
-
-    if is_zip:
-        # ── ZIP flow (onedir) ────────────────────────────────────────────────
-        stage_root = install_dir / (current_exe.stem + ".update_staging")
-        stage_zip = install_dir / (current_exe.stem + ".update.zip")
-        try:
-            if stage_root.exists():
-                shutil.rmtree(stage_root, ignore_errors=True)
-            stage_root.mkdir(parents=True, exist_ok=True)
-            _download(download_url, stage_zip)
-            with zipfile.ZipFile(stage_zip) as z:
-                z.extractall(stage_root)
-            try:
-                stage_zip.unlink()
-            except Exception:
-                pass
-        except Exception as exc:
-            _progress.error = str(exc)
-            return False, f"Échec du téléchargement / extraction : {exc}"
-
-        # If the ZIP wraps a single top-level folder, descend into it
-        extracted = stage_root
-        entries = list(stage_root.iterdir())
-        if len(entries) == 1 and entries[0].is_dir():
-            extracted = entries[0]
-
-        vbs = f'''\
-Dim oShell, oFS, logFile
-Set oShell = CreateObject("WScript.Shell")
-Set oFS   = CreateObject("Scripting.FileSystemObject")
-Set logFile = oFS.OpenTextFile("{esc(log_path)}", 8, True)
-logFile.WriteLine Now & " zip-updater started, waiting for PID {pid}"
-
-Dim waited
-waited = 0
-Do While waited < 30
-    Dim oProc, col, found
-    On Error Resume Next
-    Set oProc = GetObject("winmgmts:{{impersonationLevel=impersonate}}!//./root/cimv2")
-    Set col = oProc.ExecQuery("SELECT * FROM Win32_Process WHERE ProcessId = {pid}")
-    found = (col.Count > 0)
-    On Error GoTo 0
-    If Not found Then Exit Do
-    WScript.Sleep 1000
-    waited = waited + 1
-Loop
-logFile.WriteLine Now & " process gone after " & waited & "s"
-
-WScript.Sleep 4000
-
-Dim retries, ok, rc
-retries = 30
-ok = False
-Do While retries > 0 And Not ok
-    rc = oShell.Run("cmd /c xcopy /E /Y /I /Q /R " & Chr(34) & "{esc(extracted)}\\*" & Chr(34) & " " & Chr(34) & "{esc(install_dir)}" & Chr(34), 0, True)
-    If rc = 0 Then
-        ok = True
-        logFile.WriteLine Now & " xcopy succeeded"
-    Else
-        logFile.WriteLine Now & " xcopy failed rc=" & rc & " retry " & retries
-        WScript.Sleep 2000
-    End If
-    retries = retries - 1
-Loop
-
-If ok Then
-    On Error Resume Next
-    oFS.DeleteFolder "{esc(stage_root)}", True
-    On Error GoTo 0
-    logFile.WriteLine Now & " launching " & "{esc(current_exe)}"
-    logFile.Close
-    oShell.Run Chr(34) & "{esc(current_exe)}" & Chr(34), 1, False
-Else
-    logFile.WriteLine Now & " FAILED: xcopy gave up"
-    logFile.Close
-End If
-
-WScript.Sleep 1000
-On Error Resume Next
-oFS.DeleteFile WScript.ScriptFullName, True
-'''
-    else:
-        # ── EXE flow (legacy onefile) ────────────────────────────────────────
-        tmp_exe = install_dir / (current_exe.stem + ".update.exe")
-        mei_path = getattr(sys, "_MEIPASS", "")
-        try:
-            _download(download_url, tmp_exe)
-        except Exception as exc:
-            _progress.error = str(exc)
-            return False, f"Échec du téléchargement : {exc}"
-
-        vbs = f'''\
-Dim oShell, oFS, logFile
-Set oShell = CreateObject("WScript.Shell")
-Set oFS   = CreateObject("Scripting.FileSystemObject")
-Set logFile = oFS.OpenTextFile("{esc(log_path)}", 8, True)
-logFile.WriteLine Now & " updater started, waiting for PID {pid}"
-
-Dim waited
-waited = 0
-Do While waited < 30
-    Dim oProc, col, found
-    On Error Resume Next
-    Set oProc = GetObject("winmgmts:{{impersonationLevel=impersonate}}!//./root/cimv2")
-    Set col = oProc.ExecQuery("SELECT * FROM Win32_Process WHERE ProcessId = {pid}")
-    found = (col.Count > 0)
-    On Error GoTo 0
-    If Not found Then Exit Do
-    WScript.Sleep 1000
-    waited = waited + 1
-Loop
-logFile.WriteLine Now & " process gone after " & waited & "s"
-
-WScript.Sleep 4000
-
-''' + (f'''
-On Error Resume Next
-If oFS.FolderExists("{esc(mei_path)}") Then
-    oFS.DeleteFolder "{esc(mei_path)}", True
-End If
-On Error GoTo 0
-''' if mei_path else '') + f'''
-Dim retries, replaced
-retries = 30
-replaced = False
-Do While retries > 0 And Not replaced
-    On Error Resume Next
-    oFS.CopyFile "{esc(tmp_exe)}", "{esc(current_exe)}", True
-    If Err.Number = 0 Then
-        replaced = True
-        logFile.WriteLine Now & " copy succeeded"
-    Else
-        logFile.WriteLine Now & " copy failed (retry " & retries & "): " & Err.Description
-        Err.Clear
-    End If
-    On Error GoTo 0
-    If Not replaced Then WScript.Sleep 2000
-    retries = retries - 1
-Loop
-
-If replaced Then
-    On Error Resume Next
-    oFS.DeleteFile "{esc(tmp_exe)}", True
-    On Error GoTo 0
-    logFile.WriteLine Now & " launching " & "{esc(current_exe)}"
-    logFile.Close
-    oShell.Run Chr(34) & "{esc(current_exe)}" & Chr(34), 1, False
-Else
-    logFile.WriteLine Now & " FAILED: gave up after all retries"
-    logFile.Close
-End If
-
-WScript.Sleep 1000
-On Error Resume Next
-oFS.DeleteFile WScript.ScriptFullName, True
-'''
-
     try:
-        vbs_path.write_text(vbs, encoding="utf-8")
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        def _retrieve(url, dest, hook):
+            with opener.open(url) as src:
+                total = int(src.headers.get("Content-Length", 0))
+                block = 8192
+                count = 0
+                with open(dest, "wb") as f:
+                    while True:
+                        chunk = src.read(block)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        count += 1
+                        hook(count, block, total)
+        _retrieve(download_url, str(tmp_exe), _progress.hook)
+        _progress.percent = 100
     except Exception as exc:
         _progress.error = str(exc)
-        return False, f"Impossible d'écrire le script de mise à jour : {exc}"
+        return False, f"Échec du téléchargement : {exc}"
+
+    # PowerShell script runs fully detached and windowless.
+    # It kills this process by PID — more reliable than relying on the process to exit
+    # on its own. The previous signal-file approach failed because webview.destroy() from
+    # a background thread doesn't reliably unblock webview.start() on Windows, and
+    # os._exit() from an executor thread can be intercepted. Stop-Process -Force is an
+    # external TerminateProcess() call that bypasses all of that.
+    mei_path = getattr(sys, "_MEIPASS", "")
+    ps_path = Path(str(current_exe) + "_update.ps1")
+    ps = (
+        "Start-Sleep -Seconds 1\n"
+        f"Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue\n"
+        "Start-Sleep -Seconds 2\n"
+        + (f'Remove-Item -Recurse -Force "{mei_path}" -ErrorAction SilentlyContinue\n' if mei_path else "")
+        + "$retries = 20\n"
+        "while ($retries -gt 0) {\n"
+        "  try {\n"
+        f'    Move-Item -Force "{tmp_exe}" "{current_exe}"\n'
+        "    break\n"
+        "  } catch {\n"
+        "    Start-Sleep -Seconds 1\n"
+        "    $retries--\n"
+        "  }\n"
+        "}\n"
+        f'Start-Process "{current_exe}"\n'
+        "Remove-Item $MyInvocation.MyCommand.Path -Force\n"
+    )
 
     try:
+        ps_path.write_text(ps, encoding="utf-8")
         subprocess.Popen(
-            ["wscript.exe", str(vbs_path)],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
-            close_fds=True,
+            [
+                "powershell",
+                "-WindowStyle", "Hidden",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-File", str(ps_path),
+            ],
+            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
         )
     except Exception as exc:
         _progress.error = str(exc)
-        return False, f"Impossible de lancer le script de remplacement : {exc}"
+        return False, f"Échec du script de remplacement : {exc}"
 
     _progress.done = True
-    # Give the frontend time to read progress.done.
+    # Sleep so the frontend can poll progress.done before PowerShell kills us (~1 s)
     time.sleep(3)
-    # Hard-terminate this process so PyInstaller's --onefile bootloader
-    # skips its _MEIPASS cleanup step (which can pop a "Failed to remove
-    # temporary directory" warning when WebView2 still holds DLLs). The
-    # VBScript cleans the temp dir asynchronously with retries.
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
-            kernel32.GetCurrentProcess.argtypes = []
-            kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-            kernel32.TerminateProcess.restype = ctypes.c_int
-            kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
-        except Exception:
-            pass
+    # Hard fallback in case Stop-Process didn't fire
     os._exit(0)
     return True, "Mise à jour lancée, l'application va redémarrer."

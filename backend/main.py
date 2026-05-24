@@ -19,6 +19,7 @@ from messages import MessageScheduler, load_messages, save_messages
 from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
 from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
+import prerequisites as prereq_mod
 from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
 import plugins as plugins_mod
 from rcon import rcon_client
@@ -116,6 +117,8 @@ registry.set_player_callbacks(_on_player_connect, _on_player_disconnect)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
     scheduler.start()
     wipe_scheduler.start()
     time_scheduler.start()
@@ -144,12 +147,6 @@ app.add_middleware(
 # ── WebSocket console clients ──────────────────────────────────────────────
 active_ws: list[WebSocket] = []
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
-@app.on_event("startup")
-async def _capture_main_loop():
-    global _main_loop
-    _main_loop = asyncio.get_running_loop()
 
 
 def broadcast_log(line: str) -> None:
@@ -642,10 +639,25 @@ async def install_server(body: InstallServerBody):
     return {"success": True, "message": "Installation démarrée…"}
 
 
-@app.post("/api/installer/server/validate")
-async def validate_server(body: InstallServerBody):
-    installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
-    return {"success": True, "message": "Vérification démarrée…"}
+# ── Prerequisites routes ──────────────────────────────────────────────────
+
+@app.get("/api/prerequisites")
+async def get_prerequisites():
+    # check_all() runs subprocess (dotnet check) — must not block event loop
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, prereq_mod.check_all)
+    return result
+
+@app.get("/api/prerequisites/progress")
+async def get_prereq_progress():
+    return prereq_mod.get_progress()
+
+@app.post("/api/prerequisites/{pid}/install")
+async def install_prereq(pid: str):
+    ok = prereq_mod.install(pid)
+    if not ok:
+        return {"success": False, "message": "Prérequis inconnu ou non installable."}
+    return {"success": True, "message": f"Installation de {pid} démarrée…"}
 
 
 # ── Bans routes ──────────────────────────────────────────────────────────
@@ -980,63 +992,6 @@ async def update_plugin(name: str):
     if ok and manager.is_running:
         await manager.send_command(f"oxide.reload {name}")
     return {"success": ok, "message": msg}
-
-
-# ── Port opener ───────────────────────────────────────────────────────────
-
-class OpenPortsBody(BaseModel):
-    game_port: int = 28015
-    rcon_port: int = 28016
-    query_port: int = 28017
-
-
-@app.post("/api/installer/ports/open")
-async def open_ports(body: OpenPortsBody):
-    import sys
-    import subprocess as _sp
-
-    if sys.platform != "win32":
-        return {
-            "success": False,
-            "message": "Ouverture automatique uniquement sur Windows. Ouvrez les ports manuellement avec ufw ou iptables.",
-            "details": [],
-        }
-
-    rules = [
-        ("Rust Server Game UDP", "UDP", str(body.game_port)),
-        ("Rust Server Game TCP", "TCP", str(body.game_port)),
-        ("Rust Server RCON", "TCP", str(body.rcon_port)),
-        ("Rust Server Query UDP", "UDP", str(body.query_port)),
-    ]
-
-    details = []
-    errors = []
-    for name, proto, port in rules:
-        cmd = [
-            "netsh", "advfirewall", "firewall", "add", "rule",
-            f"name={name}",
-            "dir=in", "action=allow",
-            f"protocol={proto}",
-            f"localport={port}",
-        ]
-        try:
-            result = _sp.run(cmd, capture_output=True, text=True, timeout=10)
-            ok = result.returncode == 0
-            line = f"{'OK' if ok else 'ERREUR'} — {name} ({proto}/{port})"
-            if not ok:
-                line += f": {(result.stdout or result.stderr or '').strip()}"
-                errors.append(line)
-            details.append(line)
-        except Exception as exc:
-            msg = f"ERREUR — {name}: {exc}"
-            details.append(msg)
-            errors.append(msg)
-
-    return {
-        "success": len(errors) == 0,
-        "message": "Ports ouverts avec succès." if not errors else f"{len(errors)} règle(s) échouée(s) — vérifiez les droits administrateur.",
-        "details": details,
-    }
 
 
 # ── Folder browser (desktop only) ─────────────────────────────────────────

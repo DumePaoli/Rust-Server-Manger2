@@ -16,7 +16,6 @@ from players import PlayerManager
 @dataclass
 class ServerStatus:
     running: bool = False
-    server_ready: bool = False
     pid: Optional[int] = None
     uptime_seconds: int = 0
     cpu_percent: float = 0.0
@@ -25,16 +24,6 @@ class ServerStatus:
     auto_restart: bool = False
     restart_count: int = 0
     last_crash_at: Optional[str] = None
-
-
-# Log patterns that confirm the server is accepting connections.
-_READY_PATTERNS = [
-    "server startup complete",
-    "server startup time",
-    "oxide v",           # Oxide/uMod loads after server is ready
-    "listening on port",
-    "listening: steam",
-]
 
 
 class ServerManager:
@@ -53,7 +42,6 @@ class ServerManager:
         self._auto_restart_max: int = 5
         self._restart_count: int = 0
         self._last_crash_at: Optional[str] = None
-        self._server_ready: bool = False
 
     def add_log_callback(self, cb: Callable[[str], None]) -> None:
         self._log_callbacks.append(cb)
@@ -70,10 +58,6 @@ class ServerManager:
         if len(self._console_log) > 500:
             self._console_log = self._console_log[-500:]
         self.players.on_log_line(line)
-        if not self._server_ready:
-            low = line.lower()
-            if any(pat in low for pat in _READY_PATTERNS):
-                self._server_ready = True
         for cb in self._log_callbacks:
             try:
                 cb(entry)
@@ -93,7 +77,7 @@ class ServerManager:
             last_crash_at=self._last_crash_at,
         )
         if not self.is_running or self._process is None:
-            return ServerStatus(running=False, server_ready=False, **base)
+            return ServerStatus(running=False, **base)
         try:
             proc = psutil.Process(self._process.pid)
             mem = proc.memory_info().rss / (1024 * 1024)
@@ -101,7 +85,6 @@ class ServerManager:
             uptime = int((datetime.now() - self._started_at).total_seconds()) if self._started_at else 0
             return ServerStatus(
                 running=True,
-                server_ready=self._server_ready,
                 pid=self._process.pid,
                 uptime_seconds=uptime,
                 cpu_percent=cpu,
@@ -110,7 +93,7 @@ class ServerManager:
                 **base,
             )
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            return ServerStatus(running=False, server_ready=False, **base)
+            return ServerStatus(running=False, **base)
 
     def get_console_log(self) -> list[str]:
         return self._console_log.copy()
@@ -121,7 +104,6 @@ class ServerManager:
 
         self._config = config
         self._stopping = False
-        self._server_ready = False
         self._auto_restart = bool(config.get("auto_restart", False))
         self._auto_restart_delay = int(config.get("auto_restart_delay", 10))
         self._auto_restart_max = int(config.get("auto_restart_max", 5))
@@ -133,145 +115,89 @@ class ServerManager:
         if not Path(executable).exists():
             return False, f"Executable not found: {executable}"
 
+        server_dir = str(Path(executable).parent)
         cmd = self._build_command(executable, config)
         try:
-            kwargs = dict(
+            popen_kwargs: dict = dict(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                bufsize=0,
-                cwd=str(Path(executable).parent),
+                text=True,
+                bufsize=1,
+                cwd=server_dir,
             )
             if sys.platform == "win32":
-                kwargs["creationflags"] = (
-                    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
-                )
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = 0  # SW_HIDE
-                kwargs["startupinfo"] = si
-            self._process = subprocess.Popen(cmd, **kwargs)
+                si.wShowWindow = 0
+                popen_kwargs["startupinfo"] = si
+            self._process = subprocess.Popen(cmd, **popen_kwargs)
             self._started_at = datetime.now()
             self._restart_count = 0 if not self._stopping else self._restart_count
             self._emit(f"Server process started (PID {self._process.pid})")
-            self._emit("En attente du serveur Rust (chargement de la carte, 30-120s)...")
-            if sys.platform == "win32":
-                self._spawn_window_hider(self._process.pid)
             self._read_task = asyncio.create_task(self._read_output())
             return True, f"Server started (PID {self._process.pid})"
         except Exception as e:
             return False, str(e)
 
-    def _spawn_window_hider(self, pid: int) -> None:
-        """Hide all top-level windows owned by the child PID (Unity allocates
-        a console after spawn that CREATE_NO_WINDOW cannot prevent)."""
-        import threading
-
-        def worker():
-            import time
-            import ctypes
-            from ctypes import wintypes
-
-            user32 = ctypes.windll.user32
-            EnumWindows = user32.EnumWindows
-            GetWindowThreadProcessId = user32.GetWindowThreadProcessId
-            ShowWindow = user32.ShowWindow
-            IsWindowVisible = user32.IsWindowVisible
-
-            EnumWindowsProc = ctypes.WINFUNCTYPE(
-                ctypes.c_bool, wintypes.HWND, wintypes.LPARAM
-            )
-
-            def hide_pid_windows() -> int:
-                hidden = [0]
-
-                def cb(hwnd, _):
-                    owner_pid = wintypes.DWORD()
-                    GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
-                    if owner_pid.value == pid and IsWindowVisible(hwnd):
-                        ShowWindow(hwnd, 0)  # SW_HIDE
-                        hidden[0] += 1
-                    return True
-
-                EnumWindows(EnumWindowsProc(cb), 0)
-                return hidden[0]
-
-            # Retry over 10s — Unity console may appear late.
-            for _ in range(20):
-                if self._process is None or self._process.poll() is not None:
-                    return
-                hide_pid_windows()
-                time.sleep(0.5)
-
-        t = threading.Thread(target=worker, daemon=True)
-        t.start()
-
     def _build_command(self, executable: str, config: dict) -> list[str]:
+        # Each +cmd and its value must be SEPARATE list items so subprocess
+        # passes them as distinct argv tokens — Rust parses argv not a shell string.
+        log_file = str(Path(executable).parent / "server_output.log")
         cmd = [
             executable,
             "-batchmode",
-            f"+server.ip {config.get('server_ip', '0.0.0.0')}",
-            f"+server.port {config.get('server_port', 28015)}",
-            f"+server.maxplayers {config.get('max_players', 100)}",
-            f"+server.hostname \"{config.get('server_name', 'Rust Server')}\"",
-            f"+server.description \"{config.get('server_description', '')}\"",
-            f"+server.identity {config.get('server_identity', 'rust_server')}",
-            f"+server.saveinterval {config.get('save_interval', 600)}",
-            f"+rcon.port {config.get('rcon_port', 28016)}",
-            f"+rcon.password {config.get('rcon_password', 'changeme')}",
-            f"+rcon.web 1",
             "-nographics",
+            "+server.ip",         str(config.get("server_ip", "0.0.0.0")),
+            "+server.port",       str(config.get("server_port", 28015)),
+            "+server.queryport",  str(config.get("query_port", 28017)),
+            "+server.maxplayers", str(config.get("max_players", 100)),
+            "+server.hostname",   str(config.get("server_name", "Rust Server")),
+            "+server.description",str(config.get("server_description", "")),
+            "+server.identity",   str(config.get("server_identity", "rust_server")),
+            "+server.saveinterval",str(config.get("save_interval", 600)),
+            "+rcon.port",         str(config.get("rcon_port", 28016)),
+            "+rcon.password",     str(config.get("rcon_password", "changeme")),
+            "+rcon.web",          "1",
+            "-logFile",           log_file,
         ]
         custom_map = config.get("custom_map_url", "")
         if custom_map:
-            cmd.append(f"+server.levelurl \"{custom_map}\"")
+            cmd += ["+server.levelurl", custom_map]
         else:
             cmd += [
-                f"+server.seed {config.get('map_seed', 12345)}",
-                f"+server.worldsize {config.get('map_size', 3500)}",
-                f"+server.level \"{config.get('level', 'Procedural Map')}\"",
+                "+server.seed",      str(config.get("map_seed", 12345)),
+                "+server.worldsize", str(config.get("map_size", 3500)),
+                "+server.level",     str(config.get("level", "Procedural Map")),
             ]
         if config.get("gather_rate", 1.0) != 1.0:
-            cmd.append(f"+server.gatherscale {config.get('gather_rate', 1.0)}")
+            cmd += ["+server.gatherscale", str(config.get("gather_rate", 1.0))]
         if config.get("craft_rate", 1.0) != 1.0:
-            cmd.append(f"+craft.instant {1 if config.get('craft_rate', 1.0) == 0 else 0}")
+            cmd += ["+craft.instant", "1" if config.get("craft_rate", 1.0) == 0 else "0"]
         if config.get("pve"):
-            cmd.append("+server.pve 1")
+            cmd += ["+server.pve", "1"]
         if not config.get("radiation", True):
-            cmd.append("+radiation.enabled false")
+            cmd += ["+radiation.enabled", "false"]
         if config.get("hardcore"):
-            cmd.append("+server.hardcore 1")
+            cmd += ["+server.hardcore", "1"]
         admin_id = config.get("admin_steamid", "")
         if admin_id:
-            cmd.append(f"+server.ownerid {admin_id}")
+            cmd += ["+server.ownerid", admin_id]
         tags = config.get("server_tags", [])
         if tags:
-            cmd.append(f"+server.tags \"{','.join(tags)}\"")
+            cmd += ["+server.tags", ",".join(tags)]
         return cmd
 
     async def _read_output(self) -> None:
         if self._process is None or not hasattr(self._process, "stdout"):
             return
         loop = asyncio.get_event_loop()
-
-        def _read_chunks():
-            buf = b""
-            while True:
-                chunk = self._process.stdout.read(512)
-                if not chunk:
-                    break
-                buf += chunk
-                parts = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n")
-                buf = parts[-1]
-                for part in parts[:-1]:
-                    line = part.decode("utf-8", errors="replace").strip()
-                    if line:
-                        self._emit(line)
-            if buf.strip():
-                self._emit(buf.decode("utf-8", errors="replace").strip())
-
         try:
-            await loop.run_in_executor(None, _read_chunks)
+            while self.is_running:
+                line = await loop.run_in_executor(None, self._process.stdout.readline)
+                if not line:
+                    break
+                self._emit(line.rstrip())
         except Exception:
             pass
         self._emit("Server process ended.")
@@ -299,7 +225,6 @@ class ServerManager:
             return False, "Server is not running."
         try:
             self._stopping = True
-            self._server_ready = False
             self._process.terminate()
             self._emit("SIGTERM sent to server process...")
             await asyncio.sleep(5)

@@ -226,6 +226,14 @@ def _tail_log_file(log_path: str, stop_event: threading.Event) -> None:
         pass
 
 
+def _is_admin() -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
 def _run_steamcmd(steamcmd_path: str, args: list) -> int:
     steamcmd_dir = str(Path(steamcmd_path).parent)
     log_path = os.path.join(steamcmd_dir, "logs", "stderr.txt")
@@ -233,6 +241,8 @@ def _run_steamcmd(steamcmd_path: str, args: list) -> int:
     stop_tail = threading.Event()
     tail_thread = threading.Thread(target=_tail_log_file, args=(log_path, stop_tail), daemon=True)
     tail_thread.start()
+
+    _progress.log(f"Exécution : {steamcmd_path}")
 
     try:
         proc = subprocess.Popen(
@@ -243,13 +253,40 @@ def _run_steamcmd(steamcmd_path: str, args: list) -> int:
             bufsize=0,
             **( {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {} ),
         )
-    except PermissionError:
+    except PermissionError as exc:
         stop_tail.set()
         tail_thread.join(timeout=2)
-        raise PermissionError(
-            "Accès refusé — relancez le logiciel en tant qu'Administrateur "
-            "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
-        )
+        winerr = getattr(exc, "winerror", None)
+        exists = os.path.isfile(steamcmd_path)
+        already_admin = _is_admin() if sys.platform == "win32" else False
+        _progress.log(f"[diagnostic] winerror={winerr} exists={exists} admin={already_admin}")
+        if not exists:
+            raise PermissionError(
+                f"steamcmd.exe introuvable : '{steamcmd_path}'. "
+                "Réinstallez SteamCMD via l'onglet Installer."
+            )
+        elif already_admin:
+            raise PermissionError(
+                f"Accès refusé à '{steamcmd_path}' (code {winerr}) malgré les droits administrateur. "
+                "Cause probable : Windows Defender ou un antivirus bloque l'exécution de steamcmd.exe. "
+                "Solutions : "
+                "(1) Ouvrez Windows Defender → Protection contre les virus → Exclusions → ajoutez le dossier contenant steamcmd.exe ; "
+                "(2) Désactivez temporairement la protection en temps réel puis relancez ; "
+                "(3) Déplacez steamcmd.exe vers C:\\steamcmd\\ (dossier moins surveillé)."
+            )
+        else:
+            raise PermissionError(
+                "Accès refusé — relancez le logiciel en tant qu'Administrateur "
+                "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
+            )
+    except OSError as exc:
+        stop_tail.set()
+        tail_thread.join(timeout=2)
+        raise OSError(
+            f"Impossible de lancer steamcmd.exe (erreur {exc.winerror if hasattr(exc, 'winerror') else exc.errno}) : {exc.strerror}. "
+            f"Chemin : '{steamcmd_path}'"
+        ) from exc
+
     buf = b""
     while True:
         chunk = proc.stdout.read(4096)
@@ -345,7 +382,7 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
 
     except PermissionError as exc:
         msg = str(exc)
-        if "Administrateur" not in msg:
+        if "Administrateur" not in msg and "antivirus" not in msg and "introuvable" not in msg:
             msg = (
                 "Accès refusé — relancez le logiciel en tant qu'Administrateur "
                 "(clic droit sur RustServerManager.exe → Exécuter en tant qu'administrateur)."
