@@ -141,47 +141,51 @@ class ServerManager:
             return False, str(e)
 
     def _build_command(self, executable: str, config: dict) -> list[str]:
+        # Each +cmd and its value must be SEPARATE list items so subprocess
+        # passes them as distinct argv tokens — Rust parses argv not a shell string.
+        log_file = str(Path(executable).parent / "server_output.log")
         cmd = [
             executable,
             "-batchmode",
-            f"+server.ip {config.get('server_ip', '0.0.0.0')}",
-            f"+server.port {config.get('server_port', 28015)}",
-            f"+server.maxplayers {config.get('max_players', 100)}",
-            f"+server.hostname \"{config.get('server_name', 'Rust Server')}\"",
-            f"+server.description \"{config.get('server_description', '')}\"",
-            f"+server.identity {config.get('server_identity', 'rust_server')}",
-            f"+server.saveinterval {config.get('save_interval', 600)}",
-            f"+rcon.port {config.get('rcon_port', 28016)}",
-            f"+rcon.password {config.get('rcon_password', 'changeme')}",
-            f"+rcon.web 1",
             "-nographics",
-            f"-logFile \"{Path(executable).parent / 'server_output.log'}\"",
+            "+server.ip",         str(config.get("server_ip", "0.0.0.0")),
+            "+server.port",       str(config.get("server_port", 28015)),
+            "+server.queryport",  str(config.get("query_port", 28017)),
+            "+server.maxplayers", str(config.get("max_players", 100)),
+            "+server.hostname",   str(config.get("server_name", "Rust Server")),
+            "+server.description",str(config.get("server_description", "")),
+            "+server.identity",   str(config.get("server_identity", "rust_server")),
+            "+server.saveinterval",str(config.get("save_interval", 600)),
+            "+rcon.port",         str(config.get("rcon_port", 28016)),
+            "+rcon.password",     str(config.get("rcon_password", "changeme")),
+            "+rcon.web",          "1",
+            "-logFile",           log_file,
         ]
         custom_map = config.get("custom_map_url", "")
         if custom_map:
-            cmd.append(f"+server.levelurl \"{custom_map}\"")
+            cmd += ["+server.levelurl", custom_map]
         else:
             cmd += [
-                f"+server.seed {config.get('map_seed', 12345)}",
-                f"+server.worldsize {config.get('map_size', 3500)}",
-                f"+server.level \"{config.get('level', 'Procedural Map')}\"",
+                "+server.seed",      str(config.get("map_seed", 12345)),
+                "+server.worldsize", str(config.get("map_size", 3500)),
+                "+server.level",     str(config.get("level", "Procedural Map")),
             ]
         if config.get("gather_rate", 1.0) != 1.0:
-            cmd.append(f"+server.gatherscale {config.get('gather_rate', 1.0)}")
+            cmd += ["+server.gatherscale", str(config.get("gather_rate", 1.0))]
         if config.get("craft_rate", 1.0) != 1.0:
-            cmd.append(f"+craft.instant {1 if config.get('craft_rate', 1.0) == 0 else 0}")
+            cmd += ["+craft.instant", "1" if config.get("craft_rate", 1.0) == 0 else "0"]
         if config.get("pve"):
-            cmd.append("+server.pve 1")
+            cmd += ["+server.pve", "1"]
         if not config.get("radiation", True):
-            cmd.append("+radiation.enabled false")
+            cmd += ["+radiation.enabled", "false"]
         if config.get("hardcore"):
-            cmd.append("+server.hardcore 1")
+            cmd += ["+server.hardcore", "1"]
         admin_id = config.get("admin_steamid", "")
         if admin_id:
-            cmd.append(f"+server.ownerid {admin_id}")
+            cmd += ["+server.ownerid", admin_id]
         tags = config.get("server_tags", [])
         if tags:
-            cmd.append(f"+server.tags \"{','.join(tags)}\"")
+            cmd += ["+server.tags", ",".join(tags)]
         return cmd
 
     async def _read_output(self) -> None:
