@@ -167,6 +167,25 @@ def _parse_progress(line: str) -> None:
             pass
 
 
+# Rust Dedicated Server is ~22 GB uncompressed. Used to estimate download %.
+_RUST_EXPECTED_BYTES = 22 * 1024 ** 3
+
+
+def _dir_size_monitor(server_dir: str, stop_event: threading.Event, base_pct: int = 5) -> None:
+    """Estimate install progress by watching how much data SteamCMD has written."""
+    p = Path(server_dir)
+    while not stop_event.is_set():
+        try:
+            total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            pct = base_pct + int(total * (99 - base_pct) / _RUST_EXPECTED_BYTES)
+            pct = min(99, pct)
+            if pct > _progress.percent:
+                _progress.percent = pct
+        except Exception:
+            pass
+        stop_event.wait(3)
+
+
 def _tail_log_file(log_path: str, stop_event: threading.Event) -> None:
     """Read SteamCMD's own log file in parallel to catch buffered output."""
     try:
@@ -250,6 +269,15 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
         _progress.log("Étape 2/2 — Téléchargement du serveur Rust...")
         _progress.log("(peut prendre 20-40 minutes)")
         _progress.log("─" * 40)
+        _progress.percent = 5  # show we've started
+
+        stop_size_mon = threading.Event()
+        size_mon = threading.Thread(
+            target=_dir_size_monitor,
+            args=(server_dir, stop_size_mon, 5),
+            daemon=True,
+        )
+        size_mon.start()
 
         ret = _run_steamcmd(steamcmd_path, [
             "+force_install_dir", server_dir,
@@ -257,6 +285,9 @@ def _install_server_thread(steamcmd_path: str, server_dir: str) -> None:
             "+app_update", RUST_APP_ID, "validate",
             "+quit",
         ])
+
+        stop_size_mon.set()
+        size_mon.join(timeout=1)
 
         _progress.log("─" * 40)
 
