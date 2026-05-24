@@ -439,6 +439,8 @@ export default function ServerSettings() {
                   checked={!!config.auto_wipe_blueprints} onChange={v => set("auto_wipe_blueprints", v)} />
               </div>
               <div className="border-t border-surface-600 pt-4 space-y-3">
+                <ToggleRow label="Connexion RCON automatique" desc="Connecte automatiquement le RCON quand le serveur est prêt"
+                  checked={!!config.rcon_auto_connect} onChange={v => set("rcon_auto_connect", v)} />
                 <ToggleRow label="Redémarrage automatique" desc="Redémarre le serveur automatiquement s'il crashe"
                   checked={!!config.auto_restart} onChange={v => set("auto_restart", v)} />
                 {config.auto_restart && (

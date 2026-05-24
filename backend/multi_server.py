@@ -16,6 +16,7 @@ _SERVER_DEFAULTS = {
     "server_port": 28015,
     "rcon_port": 28016,
     "rcon_password": "changeme",
+    "rcon_auto_connect": False,
     "query_port": 28017,
     "max_players": 100,
     "level": "Procedural Map",

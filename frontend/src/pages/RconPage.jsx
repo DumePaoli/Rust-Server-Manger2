@@ -80,6 +80,16 @@ export default function RconPage() {
     } catch {}
   }, []);
 
+  // Pre-fill from server config on first load (only if fields untouched)
+  useEffect(() => {
+    axios.get(`${BASE}/api/config`).then(({ data }) => {
+      if (data.rcon_port)     setPort(String(data.rcon_port));
+      if (data.rcon_password) setPassword(data.rcon_password);
+      const ip = data.server_ip;
+      if (ip && ip !== "0.0.0.0") setHost(ip);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     loadStatus();
     loadHistory();

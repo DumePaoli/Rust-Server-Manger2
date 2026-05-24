@@ -180,6 +180,29 @@ async def get_status():
     return status.__dict__
 
 
+async def _auto_rcon_when_ready(config: dict):
+    """Background task: wait for server_ready then auto-connect RCON if configured."""
+    if not config.get("rcon_auto_connect"):
+        return
+    password = config.get("rcon_password", "")
+    if not password or password == "changeme":
+        return
+    host = config.get("server_ip", "127.0.0.1")
+    if host in ("0.0.0.0", ""):
+        host = "127.0.0.1"
+    port = int(config.get("rcon_port", 28016))
+    # Poll up to 5 minutes for server_ready
+    for _ in range(150):
+        await asyncio.sleep(2)
+        m = registry.get_active_manager()
+        if not m or not m.is_running:
+            break
+        if m._server_ready:
+            if not rcon_client._connected:
+                await rcon_client.connect(host, port, password)
+            break
+
+
 @app.post("/api/start")
 async def start_server():
     active = registry.get_active()
@@ -187,6 +210,7 @@ async def start_server():
     ok, msg = await manager.start(config)
     if ok:
         asyncio.get_event_loop().run_in_executor(None, discord.send_event, "server_start")
+        asyncio.create_task(_auto_rcon_when_ready(config))
     return {"success": ok, "message": msg}
 
 
