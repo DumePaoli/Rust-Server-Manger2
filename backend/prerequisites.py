@@ -8,6 +8,7 @@ import threading
 import tempfile
 import shutil
 import urllib.request
+import urllib.error
 from typing import Optional
 
 # ── Checks ───────────────────────────────────────────────────────────────────

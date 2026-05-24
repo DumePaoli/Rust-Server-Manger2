@@ -643,7 +643,10 @@ async def install_server(body: InstallServerBody):
 
 @app.get("/api/prerequisites")
 async def get_prerequisites():
-    return prereq_mod.check_all()
+    # check_all() runs subprocess (dotnet check) — must not block event loop
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, prereq_mod.check_all)
+    return result
 
 @app.get("/api/prerequisites/progress")
 async def get_prereq_progress():

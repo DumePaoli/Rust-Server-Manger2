@@ -68,6 +68,7 @@ function ProgressBar({ percent, status }) {
 
 function PrerequisitesCard() {
   const [prereqs, setPrereqs] = useState(null);
+  const [loadErr, setLoadErr] = useState(false);
   const [progress, setProgress] = useState({});
   const pollRef = useRef(null);
 
@@ -75,7 +76,10 @@ function PrerequisitesCard() {
     try {
       const { data } = await axios.get(`${BASE}/api/prerequisites`);
       setPrereqs(data);
-    } catch {}
+      setLoadErr(false);
+    } catch {
+      setLoadErr(true);
+    }
   }, []);
 
   const pollProgress = useCallback(() => {
@@ -104,7 +108,18 @@ function PrerequisitesCard() {
     } catch {}
   };
 
-  if (!prereqs) return null;
+  if (loadErr) return (
+    <div className="card flex items-center gap-2 text-xs text-yellow-400">
+      <AlertCircle size={13} className="shrink-0" />
+      Prérequis non vérifiés (backend indisponible)
+    </div>
+  );
+  if (!prereqs) return (
+    <div className="card flex items-center gap-2 text-xs text-gray-500">
+      <Loader2 size={13} className="animate-spin shrink-0" />
+      Vérification des prérequis…
+    </div>
+  );
   const allOk = Object.values(prereqs).every(p => p.installed);
 
   return (
