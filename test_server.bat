@@ -62,7 +62,7 @@ echo.
   +rcon.port %RCON_PORT% ^
   +rcon.password %RCON_PASS% ^
   +rcon.web 1 ^
-  -logFile "%SERVER_DIR%\server_output.log"
+  -logFile -
 
 echo.
 echo Serveur arrete (code: %ERRORLEVEL%)
