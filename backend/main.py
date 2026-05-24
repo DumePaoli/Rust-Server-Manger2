@@ -19,6 +19,7 @@ from messages import MessageScheduler, load_messages, save_messages
 from wipe import WipeScheduler, load_wipe_data, save_wipe_data, seconds_until_wipe
 from discord_notifier import notifier as discord, load_discord_config, save_discord_config
 import installer as installer_mod
+import prerequisites as prereq_mod
 from times import TimeScheduler, load_tasks, save_tasks, compute_next_run
 import plugins as plugins_mod
 from rcon import rcon_client
@@ -636,6 +637,24 @@ class InstallServerBody(BaseModel):
 async def install_server(body: InstallServerBody):
     installer_mod.start_install_server(body.steamcmd_path, body.server_dir)
     return {"success": True, "message": "Installation démarrée…"}
+
+
+# ── Prerequisites routes ──────────────────────────────────────────────────
+
+@app.get("/api/prerequisites")
+async def get_prerequisites():
+    return prereq_mod.check_all()
+
+@app.get("/api/prerequisites/progress")
+async def get_prereq_progress():
+    return prereq_mod.get_progress()
+
+@app.post("/api/prerequisites/{pid}/install")
+async def install_prereq(pid: str):
+    ok = prereq_mod.install(pid)
+    if not ok:
+        return {"success": False, "message": "Prérequis inconnu ou non installable."}
+    return {"success": True, "message": f"Installation de {pid} démarrée…"}
 
 
 # ── Bans routes ──────────────────────────────────────────────────────────

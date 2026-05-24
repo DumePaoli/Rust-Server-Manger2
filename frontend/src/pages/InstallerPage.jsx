@@ -3,6 +3,7 @@ import axios from "axios";
 import {
   Download, CheckCircle2, Circle, AlertCircle, RefreshCw,
   Terminal, Wrench, FolderOpen, ChevronRight, Check, Folder,
+  ShieldCheck, Loader2, XCircle,
 } from "lucide-react";
 
 const BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -61,6 +62,111 @@ function ProgressBar({ percent, status }) {
         className={`h-2 rounded-full transition-all duration-500 ${color}`}
         style={{ width: `${percent}%` }}
       />
+    </div>
+  );
+}
+
+function PrerequisitesCard() {
+  const [prereqs, setPrereqs] = useState(null);
+  const [progress, setProgress] = useState({});
+  const pollRef = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const { data } = await axios.get(`${BASE}/api/prerequisites`);
+      setPrereqs(data);
+    } catch {}
+  }, []);
+
+  const pollProgress = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const { data } = await axios.get(`${BASE}/api/prerequisites/progress`);
+        setProgress(data);
+        const allDone = Object.values(data).every(p => p.status === "done" || p.status === "error");
+        if (allDone && Object.keys(data).length > 0) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          load(); // refresh installed status
+        }
+      } catch {}
+    }, 1000);
+  }, [load]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const handleInstall = async (pid) => {
+    try {
+      await axios.post(`${BASE}/api/prerequisites/${pid}/install`);
+      pollProgress();
+    } catch {}
+  };
+
+  if (!prereqs) return null;
+  const allOk = Object.values(prereqs).every(p => p.installed);
+
+  return (
+    <div className="card space-y-3">
+      <div className="flex items-center gap-2">
+        <ShieldCheck size={14} className="text-rust-400" />
+        <span className="text-sm font-medium text-gray-300">Prérequis système</span>
+        {allOk && <span className="text-[10px] font-semibold bg-green-900/30 text-green-400 px-1.5 py-0.5 rounded ml-auto">Tout installé</span>}
+      </div>
+
+      <div className="space-y-2">
+        {Object.entries(prereqs).map(([pid, info]) => {
+          const p = progress[pid];
+          const installing = p && (p.status === "downloading" || p.status === "installing" || p.status === "pending");
+          const installErr = p?.status === "error";
+          const justDone = p?.status === "done";
+
+          return (
+            <div key={pid} className="flex items-center gap-3 py-1.5 px-3 rounded-lg bg-surface-700 border border-surface-600">
+              {info.installed || justDone
+                ? <CheckCircle2 size={14} className="text-green-400 shrink-0" />
+                : installErr
+                ? <XCircle size={14} className="text-red-400 shrink-0" />
+                : installing
+                ? <Loader2 size={14} className="text-rust-400 animate-spin shrink-0" />
+                : <AlertCircle size={14} className="text-yellow-400 shrink-0" />
+              }
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-gray-200">{info.name}</div>
+                <div className="text-[11px] text-gray-500 truncate">
+                  {installing
+                    ? (p.status === "downloading" ? "Téléchargement…" : "Installation…")
+                    : installErr
+                    ? (p.error ?? "Erreur")
+                    : justDone
+                    ? "Installé avec succès"
+                    : info.installed
+                    ? "Installé"
+                    : info.description}
+                </div>
+              </div>
+              {!info.installed && !justDone && info.installable && !installing && (
+                <button
+                  onClick={() => handleInstall(pid)}
+                  className="text-[11px] px-2 py-1 rounded bg-rust-600/20 text-rust-400 hover:bg-rust-600/35 transition-colors shrink-0"
+                >
+                  Installer
+                </button>
+              )}
+              {info.builtin && !info.installed && (
+                <span className="text-[10px] text-gray-600 shrink-0">Intégré Windows</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!allOk && (
+        <p className="text-[11px] text-gray-500">
+          Les prérequis manquants peuvent empêcher le serveur Rust de démarrer.
+        </p>
+      )}
     </div>
   );
 }
@@ -501,6 +607,9 @@ export default function InstallerPage() {
 
       {/* Step indicator */}
       <StepIndicator current={step} maxReached={maxReached} />
+
+      {/* Prerequisites */}
+      <PrerequisitesCard />
 
       {/* Step card */}
       <div className="card">
