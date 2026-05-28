@@ -11,6 +11,12 @@ from pathlib import Path
 from typing import Optional
 
 
+def _ssl_ctx() -> ssl.SSLContext:
+    """SSL context using certifi CA bundle — required in PyInstaller frozen builds."""
+    import certifi
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 # ── Version helpers ────────────────────────────────────────────────────────
 
 def _parse_version(v: str) -> tuple:
@@ -53,10 +59,7 @@ class UpdateChecker:
                 url,
                 headers={"User-Agent": "RustServerManager-Updater/1.0"},
             )
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+            with urllib.request.urlopen(req, timeout=6, context=_ssl_ctx()) as resp:
                 data = json.loads(resp.read().decode())
 
             latest_tag = data.get("tag_name", "").lstrip("v")
@@ -153,10 +156,7 @@ def apply_update(download_url: str) -> tuple[bool, str]:
     pid = os.getpid()
 
     try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx))
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=_ssl_ctx()))
         def _retrieve(url, dest, hook):
             with opener.open(url) as src:
                 total = int(src.headers.get("Content-Length", 0))

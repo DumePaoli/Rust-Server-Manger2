@@ -109,3 +109,20 @@ All runtime data lives in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustse
 - Responses/UI text are in **French**.
 - New backend features follow the pattern: module file → import in `main.py` → routes added before `# ── Serve React build`.
 - New pages: create `src/pages/XxxPage.jsx` → add route in `App.jsx` → add nav entry in `Sidebar.jsx` → add translation in `i18n.js`.
+
+### Runtime / deployment gotchas
+- **Carbon is primary framework** (not Oxide). Plugins at `<server_dir>/carbon/plugins/`. RCON PM command: `pm <steamid> "<message>"`. `say` requires quotes: `say "text"`.
+- **Steam A2S**: QueryPort UDP must be open in Windows Firewall or Steam browser shows "Development Server" with 0 players.
+- **SSL in frozen exe**: All `urllib.urlopen` calls need `ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE` — PyInstaller breaks default SSL cert chain.
+- **RCON auto-reconnect**: `_ManagerProxy.send_command` auto-reconnects if `rcon_client._host/_password` set but `_connected=False`.
+- **server.cfg**: Written on every server start to `<server_dir>/server/<identity>/cfg/server.cfg`. User custom ConVars preserved below the marker line.
+- **`_get_plugins_dir`**: Searches `server_data_path` then `server_dir` (relative to executable) for `carbon/plugins` or `oxide/plugins`.
+
+### Updater internals
+- Prefers `.zip` asset (onedir) over `.exe` (onefile). ZIP path uses `Expand-Archive + Copy-Item -Recurse`.
+- PS1 launched via `ShellExecuteW` (bypasses PyInstaller Windows Job Object). Fallback: `CREATE_BREAKAWAY_FROM_JOB`.
+- `_retry_pending_update()` in `launcher.py` handles PS1 left behind after Job Object kill on previous run.
+- AV unlock wait: up to 180s via `[IO.File]::Open` probe before `Move-Item`.
+
+### Removed / deprecated
+- `oxide_perms.py` exists but route `/oxide` and Sidebar entry removed — Carbon manages perms in-game.

@@ -10,6 +10,12 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
+
+def _ssl_ctx() -> ssl.SSLContext:
+    """SSL context using certifi CA bundle — required in PyInstaller frozen builds."""
+    import certifi
+    return ssl.create_default_context(cafile=certifi.where())
+
 UMOD_API = "https://umod.org/plugins.json"
 
 _FRAMEWORK_REPOS = {
@@ -34,10 +40,7 @@ def _get_github_latest_release(repo: str) -> Optional[dict]:
             "User-Agent": "RustServerManager/1.0",
             "Accept": "application/vnd.github+json",
         })
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
             return json.loads(resp.read().decode())
     except Exception:
         return None
@@ -113,10 +116,7 @@ def install_framework(config: dict, name: str) -> tuple[bool, str]:
     dl_url = asset["browser_download_url"]
     try:
         req = urllib.request.Request(dl_url, headers={"User-Agent": "RustServerManager/1.0"})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=180, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=180, context=_ssl_ctx()) as resp:
             data = resp.read()
     except Exception as exc:
         return False, f"Erreur de téléchargement: {exc}"
@@ -199,10 +199,7 @@ def search_umod(query: str = "", page: int = 1) -> dict:
             params["search"] = query.strip()
         url = UMOD_API + "?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(url, headers={"User-Agent": "RustServerManager/1.0", "Accept": "application/json"})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx()) as resp:
             return json.loads(resp.read().decode())
     except Exception as exc:
         return {"error": str(exc), "data": [], "last_page": 1, "current_page": 1}
@@ -219,10 +216,7 @@ def install_plugin(config: dict, download_url: str, name: str) -> tuple[bool, st
     dest = os.path.join(plugins_dir, name + ext)
     try:
         req = urllib.request.Request(download_url, headers={"User-Agent": "RustServerManager/1.0"})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_ctx()) as resp:
             content = resp.read()
         with open(dest, "wb") as f:
             f.write(content)
@@ -247,10 +241,7 @@ def _get_umod_plugin_info(name: str) -> Optional[dict]:
     url = f"https://umod.org/plugins/{name}.json"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "RustServerManager/1.0", "Accept": "application/json"})
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
             return json.loads(resp.read().decode())
     except Exception:
         return None
