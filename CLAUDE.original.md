@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-File guides Claude Code (claude.ai/code) for this repo.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Communication style — caveman mode (always active)
 
@@ -24,7 +24,7 @@ Auto-clarity for: security warnings, irreversible actions, ambiguous multi-step 
 - Skip files over 100KB unless required.
 - No sycophantic openers or closing fluff.
 - No emojis or em-dashes.
-- Don't guess APIs, versions, flags, commit SHAs, or package names. Verify by reading code or docs before asserting.
+- Do not guess APIs, versions, flags, commit SHAs, or package names. Verify by reading code or docs before asserting.
 
 ## Commands
 
@@ -57,20 +57,20 @@ build.bat
 
 ## Architecture
 
-**Native desktop app** (PyWebView + PyInstaller `.exe`) composed of:
+This is a **native desktop app** (PyWebView + PyInstaller `.exe`) composed of:
 
-- **`launcher.py`** — entry point. Starts uvicorn in background daemon thread, waits until ready, opens PyWebView window at `http://localhost:{port}`. Watches for `.shutdown_signal` file (written by self-update flow) to close gracefully.
-- **`backend/`** — FastAPI app (`main.py`). All Python modules imported at startup, wired together.
-- **`frontend/`** — React 19 + Vite + Tailwind CSS v3 SPA. Production: built `dist/` served by FastAPI's `StaticFiles`.
+- **`launcher.py`** — entry point. Starts uvicorn in a background daemon thread, waits for it to be ready, then opens a PyWebView window pointing at `http://localhost:{port}`. Also watches for a `.shutdown_signal` file (written by the self-update flow) to gracefully close the window.
+- **`backend/`** — FastAPI app (`main.py`). All Python modules are imported at startup and wired together.
+- **`frontend/`** — React 19 + Vite + Tailwind CSS v3 SPA. In production the built `dist/` is served by FastAPI's `StaticFiles`.
 
 ### Config & data persistence
-All runtime data in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustservermanager/` (Linux), set via `RSM_CONFIG_DIR` env var. Key files:
+All runtime data lives in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustservermanager/` (Linux), set via the `RSM_CONFIG_DIR` env var. Key files:
 - `server_config.json` — legacy single-server config (read by `config.py`)
 - `servers.json` — multi-server registry (managed by `multi_server.py`)
 - `wipe_data.json`, `messages.json`, `tasks.json`, `discord_config.json`, `backup_config.json`
 
 ### Multi-server pattern
-`backend/multi_server.py` exports singleton `registry: ServerRegistry`. Each server entry wraps own `ServerManager` instance. `main.py` uses `_ManagerProxy` — thin delegator forwarding all calls to `registry.get_active_manager()`. All existing API routes unchanged; `registry.get_active()` replaces direct `load_config()` calls where per-server config needed.
+`backend/multi_server.py` exports a singleton `registry: ServerRegistry`. Each server entry wraps its own `ServerManager` instance. `main.py` uses `_ManagerProxy` — a thin delegator that forwards all calls to `registry.get_active_manager()`. All existing API routes work unchanged; `registry.get_active()` replaces direct `load_config()` calls where per-server config is needed.
 
 ### Backend module responsibilities
 | Module | Purpose |
@@ -91,8 +91,8 @@ All runtime data in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustserverma
 
 ### Frontend structure
 - `src/api/client.js` — axios wrapper; all pages import from here for core server actions. Other pages call `axios` directly with `BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"`.
-- `src/contexts/SettingsContext.jsx` — theme (6 palettes) + language (fr/en). Theme applied by writing CSS variables (`--accent-50` … `--accent-900`) on `:root`. Persisted in `localStorage`.
-- `src/i18n.js` — simple `t(key, lang)` helper; FR translations only, EN returns key.
+- `src/contexts/SettingsContext.jsx` — theme (6 palettes) + language (fr/en). Theme is applied by writing CSS variables (`--accent-50` … `--accent-900`) on `:root`. Persisted in `localStorage`.
+- `src/i18n.js` — simple `t(key, lang)` helper; FR translations only, EN returns the key.
 - `src/components/Sidebar.jsx` — navigation + server switcher dropdown (polls `/api/servers` every 15 s).
 - Pages in `src/pages/` map 1-to-1 with backend feature modules.
 
@@ -102,20 +102,20 @@ All runtime data in `%APPDATA%\RustServerManager\` (Windows) or `~/.rustserverma
 - Reusable component classes in `index.css`: `.btn-primary`, `.btn-secondary`, `.btn-danger`, `.card`, `.input`, `.label`, `.badge-online`, `.badge-offline`.
 
 ### Self-update flow
-`updater.py` downloads `.exe.update`, writes `.shutdown_signal`, then PowerShell script waits for process exit, deletes old `_MEIPASS` PyInstaller extraction folder (prevents DLL reuse errors), moves `.exe.update` → `.exe`, relaunches.
+`updater.py` downloads a `.exe.update` file, writes `.shutdown_signal`, then a PowerShell script waits for the process to exit, deletes the old `_MEIPASS` PyInstaller extraction folder (prevents DLL reuse errors), moves `.exe.update` → `.exe`, and relaunches.
 
 ### Key conventions
-- Dev on `main` directly.
-- Responses/UI text in **French**.
-- New backend features: module file → import in `main.py` → routes added before `# ── Serve React build`.
+- Development on `main` directly.
+- Responses/UI text are in **French**.
+- New backend features follow the pattern: module file → import in `main.py` → routes added before `# ── Serve React build`.
 - New pages: create `src/pages/XxxPage.jsx` → add route in `App.jsx` → add nav entry in `Sidebar.jsx` → add translation in `i18n.js`.
 
 ### Runtime / deployment gotchas
 - **Carbon is primary framework** (not Oxide). Plugins at `<server_dir>/carbon/plugins/`. RCON PM command: `pm <steamid> "<message>"`. `say` requires quotes: `say "text"`.
 - **Steam A2S**: QueryPort UDP must be open in Windows Firewall or Steam browser shows "Development Server" with 0 players.
-- **SSL in frozen exe**: Use `_ssl_ctx()` helper (in `plugins.py`/`updater.py`) — calls `ssl.create_default_context(cafile=certifi.where())`. Never use `CERT_NONE`. `certifi` bundled via `--collect-data certifi` in PyInstaller.
+- **SSL in frozen exe**: All `urllib.urlopen` calls need `ctx.check_hostname=False; ctx.verify_mode=ssl.CERT_NONE` — PyInstaller breaks default SSL cert chain.
 - **RCON auto-reconnect**: `_ManagerProxy.send_command` auto-reconnects if `rcon_client._host/_password` set but `_connected=False`.
-- **server.cfg**: Written on every server start to `<server_dir>/server/<identity>/cfg/server.cfg`. User custom ConVars preserved below marker line.
+- **server.cfg**: Written on every server start to `<server_dir>/server/<identity>/cfg/server.cfg`. User custom ConVars preserved below the marker line.
 - **`_get_plugins_dir`**: Searches `server_data_path` then `server_dir` (relative to executable) for `carbon/plugins` or `oxide/plugins`.
 
 ### Updater internals
