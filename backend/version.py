@@ -1,2 +1,2 @@
-VERSION = "1.0.60"
+VERSION = "1.0.61"
 GITHUB_REPO = "dumepaoli/rust-server-manger2"
