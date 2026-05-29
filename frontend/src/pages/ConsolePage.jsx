@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { sendCommand } from "../api/client";
 import { WS_URL } from "../api/client";
-import { Terminal, Send, Trash2 } from "lucide-react";
+import { Terminal, Send, Trash2, Copy, Check } from "lucide-react";
 
 export default function ConsolePage() {
   const [lines, setLines] = useState([]);
@@ -9,8 +9,16 @@ export default function ConsolePage() {
   const [history, setHistory] = useState([]);
   const [histIdx, setHistIdx] = useState(-1);
   const [connected, setConnected] = useState(false);
+  const [copied, setCopied] = useState(false);
   const bottomRef = useRef(null);
   const wsRef = useRef(null);
+
+  function copyAll() {
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   useEffect(() => {
     const ws = new WebSocket(WS_URL);
@@ -90,6 +98,15 @@ export default function ConsolePage() {
           </span>
           <button
             className="btn-secondary text-sm py-1.5"
+            onClick={copyAll}
+            title="Copier tout"
+            disabled={lines.length === 0}
+          >
+            {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+            {copied ? "Copié !" : "Copier"}
+          </button>
+          <button
+            className="btn-secondary text-sm py-1.5"
             onClick={() => setLines([])}
             title="Clear console"
           >
@@ -107,7 +124,7 @@ export default function ConsolePage() {
             <span>No output yet. Start the server to see logs.</span>
           </div>
         ) : (
-          <div className="p-4 space-y-0.5">
+          <div className="p-4 space-y-0.5 select-text">
             {lines.map((line, i) => (
               <div key={i} className={`leading-5 ${lineColor(line)}`}>
                 {line}
