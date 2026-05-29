@@ -429,8 +429,11 @@ async def mute_player(steamid: str):
 @app.post("/api/players/{steamid}/message")
 async def message_player(steamid: str, body: PlayerActionBody):
     if body.reason:
-        # Carbon pm: pm <steamid> <message> — no quotes
-        await manager.send_command(f"pm {steamid} {body.reason}")
+        # Validate steamid is a 17-digit number before interpolating into RCON command
+        if not steamid.isdigit() or len(steamid) != 17:
+            return {"success": False, "error": "steamid invalide"}
+        msg = body.reason.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").replace("\r", " ")
+        await manager.send_command(f'pm {steamid} "{msg}"')
     return {"success": True}
 
 
