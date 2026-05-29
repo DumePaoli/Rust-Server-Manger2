@@ -17,6 +17,30 @@ def _ssl_ctx() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=certifi.where())
 
 UMOD_API = "https://umod.org/plugins.json"
+CODEFLING_API = "https://codefling.com/api"
+
+
+def _codefling_config_path() -> "Path":
+    env_dir = os.environ.get("RSM_CONFIG_DIR")
+    if env_dir:
+        d = Path(env_dir)
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "codefling_config.json"
+    return Path(__file__).parent / "codefling_config.json"
+
+
+def load_codefling_config() -> dict:
+    p = _codefling_config_path()
+    if p.exists():
+        with open(p, "r") as f:
+            return json.load(f)
+    return {"api_key": ""}
+
+
+def save_codefling_config(cfg: dict) -> None:
+    p = _codefling_config_path()
+    with open(p, "w") as f:
+        json.dump(cfg, f, indent=2)
 
 _FRAMEWORK_REPOS = {
     "carbon": "CarbonCommunity/Carbon",
@@ -131,7 +155,6 @@ def install_framework(config: dict, name: str) -> tuple[bool, str]:
 
 
 def _get_plugins_dir(config: dict) -> Optional[str]:
-    # Priority: server_data_path first (legacy), then server executable dir (Carbon/Oxide default)
     candidates = []
 
     data_path = config.get("server_data_path", "").strip()
@@ -148,7 +171,6 @@ def _get_plugins_dir(config: dict) -> Optional[str]:
         if os.path.isdir(p):
             return p
 
-    # Not found yet — return best guess so caller can show instructions
     if server_dir:
         return os.path.join(server_dir, "carbon/plugins")
     if data_path:
@@ -245,6 +267,69 @@ def _get_umod_plugin_info(name: str) -> Optional[dict]:
             return json.loads(resp.read().decode())
     except Exception:
         return None
+
+
+def search_codefling(query: str = "", page: int = 1, api_key: str = "") -> dict:
+    try:
+        params: dict = {"categories": "7", "page": page, "per_page": 20}
+        if query.strip():
+            params["search_term"] = query.strip()
+        if api_key:
+            params["key"] = api_key
+        url = f"{CODEFLING_API}/downloads/files?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "RustServerManager/1.0",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as exc:
+        return {"error": str(exc), "results": [], "totalPages": 1, "totalResults": 0}
+
+
+def install_codefling_plugin(config: dict, plugin_id: int, name: str, api_key: str) -> tuple[bool, str]:
+    plugins_dir = _get_plugins_dir(config)
+    if not plugins_dir:
+        return False, "server_data_path non configuré"
+
+    Path(plugins_dir).mkdir(parents=True, exist_ok=True)
+
+    headers = {"User-Agent": "RustServerManager/1.0", "Accept": "application/json"}
+
+    # Fetch file info to get downloadUrl
+    try:
+        info_url = f"{CODEFLING_API}/downloads/files/{plugin_id}"
+        if api_key:
+            info_url += f"?key={urllib.parse.quote(api_key)}"
+        req = urllib.request.Request(info_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx()) as resp:
+            info = json.loads(resp.read().decode())
+    except Exception as exc:
+        return False, f"Impossible de récupérer les infos du plugin: {exc}"
+
+    download_url = info.get("downloadUrl") or info.get("url")
+    if not download_url:
+        return False, "URL de téléchargement introuvable — vérifiez votre clé API CodeFling"
+
+    dl_headers = {"User-Agent": "RustServerManager/1.0"}
+    if api_key:
+        dl_headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        dl_req = urllib.request.Request(download_url, headers=dl_headers)
+        with urllib.request.urlopen(dl_req, timeout=60, context=_ssl_ctx()) as resp:
+            content = resp.read()
+    except Exception as exc:
+        return False, f"Erreur de téléchargement: {exc}"
+
+    dest = os.path.join(plugins_dir, name + ".cs")
+    try:
+        with open(dest, "wb") as f:
+            f.write(content)
+    except Exception as exc:
+        return False, f"Erreur d'écriture: {exc}"
+
+    return True, f"{name} installé dans {plugins_dir}"
 
 
 def check_updates(config: dict) -> list:
