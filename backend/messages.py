@@ -67,7 +67,6 @@ class MessageScheduler:
                     text = msg.get("text", "").strip()
                     if text:
                         try:
-                            safe = text.replace('"', '\\"')
-                            await self._send_fn(f'say "{safe}"')
+                            await self._send_fn(f"say {text}")
                         except Exception:
                             pass

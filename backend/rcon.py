@@ -97,8 +97,8 @@ class RconClient:
             return True, response
         except asyncio.TimeoutError:
             self._pending.pop(ident, None)
-            self._add_history(command, "(pas de réponse)", False)
-            return True, "(pas de réponse)"
+            self._add_history(command, "(envoyé — pas de réponse serveur, normal pour say/pm)", True)
+            return True, "(envoyé)"
         except asyncio.CancelledError:
             self._pending.pop(ident, None)
             return False, "Déconnecté"

@@ -429,9 +429,8 @@ async def mute_player(steamid: str):
 @app.post("/api/players/{steamid}/message")
 async def message_player(steamid: str, body: PlayerActionBody):
     if body.reason:
-        # Carbon supports `pm <steamid> <message>` for private messages
-        msg = body.reason.replace('"', '\\"')
-        await manager.send_command(f'pm {steamid} "{msg}"')
+        # Carbon pm: pm <steamid> <message> — no quotes
+        await manager.send_command(f"pm {steamid} {body.reason}")
     return {"success": True}
 
 
