@@ -228,6 +228,11 @@ def search_umod(query: str = "", page: int = 1) -> dict:
 
 
 def install_plugin(config: dict, download_url: str, name: str) -> tuple[bool, str]:
+    try:
+        _validate_plugin_name(name)
+    except ValueError as exc:
+        return False, str(exc)
+
     plugins_dir = _get_plugins_dir(config)
     if not plugins_dir:
         return False, "server_data_path non configuré"
@@ -236,6 +241,10 @@ def install_plugin(config: dict, download_url: str, name: str) -> tuple[bool, st
 
     ext = ".cs" if download_url.endswith(".cs") else ".cs"
     dest = os.path.join(plugins_dir, name + ext)
+    try:
+        _assert_within_dir(dest, plugins_dir)
+    except ValueError as exc:
+        return False, str(exc)
     try:
         req = urllib.request.Request(download_url, headers={"User-Agent": "RustServerManager/1.0"})
         with urllib.request.urlopen(req, timeout=30, context=_ssl_ctx()) as resp:
@@ -269,18 +278,41 @@ def _get_umod_plugin_info(name: str) -> Optional[dict]:
         return None
 
 
+_PLUGIN_NAME_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+_CODEFLING_HOSTS = (".codefling.com",)
+
+
+def _validate_plugin_name(name: str) -> None:
+    if not _PLUGIN_NAME_RE.match(name):
+        raise ValueError(f"Nom de plugin invalide: {name!r}")
+
+
+def _assert_within_dir(dest: str, plugins_dir: str) -> None:
+    real_dest = os.path.realpath(dest)
+    real_dir = os.path.realpath(plugins_dir)
+    if not real_dest.startswith(real_dir + os.sep) and real_dest != real_dir:
+        raise ValueError(f"Path traversal détecté: {dest!r}")
+
+
+def _validate_codefling_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"URL doit être HTTPS: {url!r}")
+    host = parsed.netloc.lower().split(":")[0]
+    if not any(host == h.lstrip(".") or host.endswith(h) for h in _CODEFLING_HOSTS):
+        raise ValueError(f"Domaine non autorisé: {host!r}")
+
+
 def search_codefling(query: str = "", page: int = 1, api_key: str = "") -> dict:
     try:
         params: dict = {"categories": "7", "page": page, "per_page": 20}
         if query.strip():
             params["search_term"] = query.strip()
-        if api_key:
-            params["key"] = api_key
         url = f"{CODEFLING_API}/downloads/files?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "RustServerManager/1.0",
-            "Accept": "application/json",
-        })
+        headers = {"User-Agent": "RustServerManager/1.0", "Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx()) as resp:
             return json.loads(resp.read().decode())
     except Exception as exc:
@@ -288,20 +320,30 @@ def search_codefling(query: str = "", page: int = 1, api_key: str = "") -> dict:
 
 
 def install_codefling_plugin(config: dict, plugin_id: int, name: str, api_key: str) -> tuple[bool, str]:
+    try:
+        _validate_plugin_name(name)
+    except ValueError as exc:
+        return False, str(exc)
+
     plugins_dir = _get_plugins_dir(config)
     if not plugins_dir:
         return False, "server_data_path non configuré"
 
     Path(plugins_dir).mkdir(parents=True, exist_ok=True)
 
-    headers = {"User-Agent": "RustServerManager/1.0", "Accept": "application/json"}
+    dest = os.path.join(plugins_dir, name + ".cs")
+    try:
+        _assert_within_dir(dest, plugins_dir)
+    except ValueError as exc:
+        return False, str(exc)
 
-    # Fetch file info to get downloadUrl
+    auth_headers = {"User-Agent": "RustServerManager/1.0", "Accept": "application/json"}
+    if api_key:
+        auth_headers["Authorization"] = f"Bearer {api_key}"
+
     try:
         info_url = f"{CODEFLING_API}/downloads/files/{plugin_id}"
-        if api_key:
-            info_url += f"?key={urllib.parse.quote(api_key)}"
-        req = urllib.request.Request(info_url, headers=headers)
+        req = urllib.request.Request(info_url, headers=auth_headers)
         with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx()) as resp:
             info = json.loads(resp.read().decode())
     except Exception as exc:
@@ -310,6 +352,11 @@ def install_codefling_plugin(config: dict, plugin_id: int, name: str, api_key: s
     download_url = info.get("downloadUrl") or info.get("url")
     if not download_url:
         return False, "URL de téléchargement introuvable — vérifiez votre clé API CodeFling"
+
+    try:
+        _validate_codefling_url(download_url)
+    except ValueError as exc:
+        return False, f"URL de téléchargement refusée: {exc}"
 
     dl_headers = {"User-Agent": "RustServerManager/1.0"}
     if api_key:
@@ -322,7 +369,6 @@ def install_codefling_plugin(config: dict, plugin_id: int, name: str, api_key: s
     except Exception as exc:
         return False, f"Erreur de téléchargement: {exc}"
 
-    dest = os.path.join(plugins_dir, name + ".cs")
     try:
         with open(dest, "wb") as f:
             f.write(content)
