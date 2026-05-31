@@ -1034,6 +1034,52 @@ async def update_plugin(name: str):
     return {"success": ok, "message": msg}
 
 
+# ── CodeFling routes ─────────────────────────────────────────────────────
+
+@app.get("/api/codefling/config")
+async def get_codefling_config():
+    cfg = plugins_mod.load_codefling_config()
+    # Mask key for display
+    key = cfg.get("api_key", "")
+    return {"api_key": ("*" * (len(key) - 4) + key[-4:]) if len(key) > 4 else ("*" * len(key)), "has_key": bool(key)}
+
+
+class CodeFlingConfigBody(BaseModel):
+    api_key: str
+
+
+@app.put("/api/codefling/config")
+async def save_codefling_config_route(body: CodeFlingConfigBody):
+    plugins_mod.save_codefling_config({"api_key": body.api_key.strip()})
+    return {"success": True}
+
+
+@app.get("/api/codefling/search")
+async def search_codefling(q: str = "", page: int = 1):
+    cfg = plugins_mod.load_codefling_config()
+    api_key = cfg.get("api_key", "")
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, plugins_mod.search_codefling, q, page, api_key)
+
+
+class CodeFlingInstallBody(BaseModel):
+    plugin_id: int
+    name: str
+
+
+@app.post("/api/codefling/install")
+async def install_codefling_plugin(body: CodeFlingInstallBody):
+    cfg = plugins_mod.load_codefling_config()
+    api_key = cfg.get("api_key", "")
+    loop = asyncio.get_event_loop()
+    active = registry.get_active()
+    config = active.config if active else load_config()
+    ok, msg = await loop.run_in_executor(
+        None, plugins_mod.install_codefling_plugin, config, body.plugin_id, body.name, api_key
+    )
+    return {"success": ok, "message": msg}
+
+
 # ── Frameworks (Carbon / Oxide) ────────────────────────────────────────────
 
 @app.get("/api/frameworks")
